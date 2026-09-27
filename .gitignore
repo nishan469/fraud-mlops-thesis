@@ -1,0 +1,15 @@
+# data (IEEE-CIS is ~700 MB and under Kaggle's competition licence)
+data/
+
+# MLflow tracking store and artifacts
+mlflow.db
+mlruns/
+mlartifacts/
+
+# generated results (regenerate with the scripts; commit selected figures deliberately)
+outputs/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

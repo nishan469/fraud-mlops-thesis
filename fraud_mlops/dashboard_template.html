@@ -1,0 +1,523 @@
+<title>Fraud Replay Monitor</title>
+<meta name="description" content="Continuous-learning replay of the IEEE-CIS fraud model: served performance, drift, retrain decisions and model versions.">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.10);
+  --wash: rgba(42, 120, 214, 0.06);
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --s4: #eda100;
+  --good: #0ca30c;
+  --good-ink: #006300;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --focus: #2a78d6;
+  --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --ring: rgba(255, 255, 255, 0.10);
+    --wash: rgba(57, 135, 229, 0.10);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --s4: #c98500;
+    --good-ink: #0ca30c;
+    --focus: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --ring: rgba(255, 255, 255, 0.10);
+  --wash: rgba(57, 135, 229, 0.10);
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --s4: #c98500;
+  --good-ink: #0ca30c;
+  --focus: #3987e5;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--page);
+  color: var(--ink);
+  font: 14px/1.5 var(--sans);
+  padding-inline: 16px;
+  padding-block: 28px 40px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 20px; }
+
+header { display: grid; gap: 10px; }
+.eyebrow { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 0; font-size: 26px; line-height: 1.2; font-weight: 650; text-wrap: balance; }
+.lede { margin: 0; color: var(--ink-2); max-width: 70ch; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--ring);
+  font-size: 12.5px; color: var(--ink-2);
+}
+.chip b { color: var(--ink); font-weight: 600; }
+.mono { font-family: var(--mono); font-size: 12px; }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.kpi {
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--ring); border-radius: 10px;
+  padding: 14px 16px; display: grid; gap: 2px; align-content: start;
+}
+.kpi .label { font-size: 12px; color: var(--ink-2); }
+.kpi .value { font-size: 28px; font-weight: 650; line-height: 1.15; }
+.kpi .note { font-size: 12px; color: var(--muted); }
+
+.card {
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--ring); border-radius: 12px;
+  padding: 18px 18px 14px; display: grid; gap: 10px; min-width: 0;
+}
+.card h2 { margin: 0; font-size: 16px; font-weight: 650; }
+.card .sub { margin: 0; color: var(--ink-2); font-size: 13px; max-width: 80ch; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 14px; height: 2px; border-radius: 1px; display: inline-block; }
+.swatch.rule { height: 0; border-top: 1px dashed var(--muted); }
+.swatch.vline { width: 1px; height: 12px; background: var(--axis); }
+
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .overlay { fill: transparent; cursor: crosshair; outline: none; }
+.chart .overlay:focus-visible { stroke: var(--focus); stroke-width: 2px; }
+.tick { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.axis-title { font-size: 11px; fill: var(--muted); }
+.end-label { font-size: 11.5px; fill: var(--ink-2); font-weight: 600; }
+.v-label { font-size: 10.5px; fill: var(--ink-2); font-family: var(--mono); }
+.ref-label { font-size: 10.5px; fill: var(--muted); }
+.tooltip {
+  position: absolute; pointer-events: none; z-index: 2;
+  background: var(--surface); color: var(--ink); border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--ring), 0 6px 20px rgba(0, 0, 0, .12);
+  padding: 8px 10px; font-size: 12.5px; min-width: 170px; display: grid; gap: 3px;
+}
+.tooltip .t-head { font-weight: 600; margin-bottom: 2px; }
+.tooltip .t-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tooltip .t-row span:first-child { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.tooltip .t-row b { font-variant-numeric: tabular-nums; font-weight: 600; }
+.tooltip .t-note { color: var(--muted); font-size: 11.5px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+details.data { font-size: 13px; }
+details.data summary { cursor: pointer; color: var(--ink-2); width: fit-content; }
+details.data summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th {
+  text-align: left; font-weight: 600; font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--grid); white-space: nowrap;
+}
+td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--grid); vertical-align: top; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.event td { background: var(--wash); }
+.pill {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  padding: 1px 8px 1px 6px; border-radius: 999px; font-size: 12px; font-weight: 550;
+  box-shadow: inset 0 0 0 1px var(--ring); color: var(--ink);
+}
+.pill i { font-style: normal; font-weight: 700; }
+.pill.good i { color: var(--good); }
+.pill.critical i { color: var(--critical); }
+.pill.serious i { color: var(--serious); }
+.pill.info i { color: var(--warning); }
+.pill.neutral i { color: var(--muted); }
+.why { color: var(--ink-2); font-size: 12.5px; }
+.delta-up { color: var(--good-ink); font-weight: 600; }
+.delta-down { color: var(--critical); font-weight: 600; }
+.muted { color: var(--muted); }
+
+footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+@media (prefers-reduced-motion: no-preference) { .tooltip { transition: opacity .08s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Continuous-learning replay · IEEE-CIS fraud detection</div>
+    <h1 id="title">Fraud Replay Monitor</h1>
+    <p class="lede" id="lede"></p>
+    <div class="chips" id="chips"></div>
+  </header>
+
+  <section class="kpis" id="kpis" aria-label="Summary"></section>
+
+  <section class="card" aria-labelledby="perf-h">
+    <h2 id="perf-h">Performance of the served model</h2>
+    <p class="sub" id="perf-sub"></p>
+    <div class="legend" id="perf-legend"></div>
+    <div class="chart" id="perf-chart"></div>
+    <details class="data"><summary>Show data table</summary><div class="table-wrap" id="perf-table"></div></details>
+  </section>
+
+  <section class="card" aria-labelledby="drift-h">
+    <h2 id="drift-h">Drift (information only)</h2>
+    <p class="sub" id="drift-sub"></p>
+    <div class="legend" id="drift-legend"></div>
+    <div class="chart" id="drift-chart"></div>
+    <details class="data"><summary>Show data table</summary><div class="table-wrap" id="drift-table"></div></details>
+  </section>
+
+  <div class="grid2">
+    <section class="card" aria-labelledby="log-h">
+      <h2 id="log-h">Decision log</h2>
+      <p class="sub">What the loop saw and did at each weekly step. Highlighted rows retrained.</p>
+      <div class="table-wrap" id="log-table"></div>
+    </section>
+    <section class="card" aria-labelledby="ver-h">
+      <h2 id="ver-h">Model versions</h2>
+      <p class="sub">Registered in MLflow. Training windows are in days since the first transaction.</p>
+      <div class="table-wrap" id="ver-table"></div>
+    </section>
+  </div>
+
+  <footer id="footer"></footer>
+</div>
+
+<script id="dashboard-data" type="application/json">__DASHBOARD_DATA__</script>
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById("dashboard-data").textContent);
+  const M = D.meta, K = D.kpis;
+  const NS = "http://www.w3.org/2000/svg";
+  const $ = (id) => document.getElementById(id);
+  const f3 = (v) => (v == null ? "–" : v.toFixed(3));
+  const day = (v) => "day " + Math.round(v);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  // ---------------------------------------------------------------- header + KPIs
+  $("lede").textContent =
+    `The ${M.model_name} model replayed over days ${Math.round(M.start_day)}–${Math.round(M.end_day)} of the data as if live. ` +
+    `Fraud labels arrive ${M.label_delay} days after a transaction, so the loop only ever judges the model on labels that old.`;
+  const chips = [
+    ["Policy", `retrain every ${M.retrain_every} d on the last ${M.window} d of labels`],
+    ["Safety net", `live PR-AUC below ${Math.round((1 - M.safety_net_tol) * 100)}% of validation`],
+    ["Champion", "v" + M.final_champion],
+    ["MLflow run", `<span class="mono">${esc((M.run_id || "").slice(0, 12))}</span>`],
+  ];
+  $("chips").innerHTML = chips.map(([k, v]) => `<span class="chip">${k}: <b>${v}</b></span>`).join("");
+
+  const worst = D.weekly.reduce((a, w) => (w.pr_auc != null && (a == null || w.pr_auc < a.pr_auc) ? w : a), null);
+  const kpis = [
+    ["Mean weekly PR-AUC", f3(K.mean_pr), "of transactions actually served"],
+    ["Worst week", f3(K.min_pr), worst ? `week starting ${day(worst.day)}` : ""],
+    ["Retrains", K.retrains, `${K.scheduled} scheduled · ${K.safety_net} safety net`],
+    ["Promoted", `${K.promotions} of ${K.promotions + K.rejections}`, K.rejections ? `${K.rejections} rejected by the gate` : "none rejected by the gate"],
+    ["Drift alerts", K.drift_alerts, "information only, no action taken"],
+  ];
+  $("kpis").innerHTML = kpis.map(([l, v, n]) =>
+    `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
+
+  // ---------------------------------------------------------------- line chart
+  function lineChart(host, opt) {
+    const H = 290, m = { t: 26, r: 92, b: 40, l: 46 };
+    const tip = document.createElement("div");
+    tip.className = "tooltip"; tip.hidden = true;
+    const xs = [...new Set(opt.series.flatMap((s) => s.points.filter((p) => p.y != null).map((p) => p.x)))].sort((a, b) => a - b);
+    let active = -1, W = 0, sx, sy, cross;
+
+    function render() {
+      W = Math.max(320, host.clientWidth);
+      const iw = W - m.l - m.r, ih = H - m.t - m.b;
+      const [x0, x1] = opt.x, [y0, y1] = opt.y;
+      sx = (v) => m.l + ((v - x0) / (x1 - x0)) * iw;
+      sy = (v) => m.t + (1 - (v - y0) / (y1 - y0)) * ih;
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-label", opt.aria);
+      const el = (tag, attrs, parent = svg) => {
+        const e = document.createElementNS(NS, tag);
+        for (const k in attrs) e.setAttribute(k, attrs[k]);
+        parent.appendChild(e);
+        return e;
+      };
+      // grid + y ticks
+      opt.yTicks.forEach((t) => {
+        el("line", { x1: m.l, x2: m.l + iw, y1: sy(t), y2: sy(t), stroke: css("--grid"), "stroke-width": 1 });
+        el("text", { x: m.l - 8, y: sy(t) + 4, "text-anchor": "end", class: "tick" }).textContent = opt.yFmt(t);
+      });
+      el("line", { x1: m.l, x2: m.l + iw, y1: m.t + ih, y2: m.t + ih, stroke: css("--axis"), "stroke-width": 1 });
+      opt.xTicks.forEach((t) => {
+        el("text", { x: sx(t), y: m.t + ih + 18, "text-anchor": "middle", class: "tick" }).textContent = t;
+      });
+      el("text", { x: m.l + iw / 2, y: H - 4, "text-anchor": "middle", class: "axis-title" }).textContent = "Day of data (days since the first transaction)";
+      // reference lines
+      (opt.refs || []).forEach((r) => {
+        el("line", { x1: m.l, x2: m.l + iw, y1: sy(r.y), y2: sy(r.y), stroke: css("--muted"), "stroke-width": 1, "stroke-dasharray": "4 4" });
+        el("text", { x: m.l + iw + 6, y: sy(r.y) + 4, class: "ref-label" }).textContent = r.label;
+      });
+      // event rules (model versions)
+      (opt.vlines || []).forEach((v) => {
+        el("line", { x1: sx(v.x), x2: sx(v.x), y1: m.t - 6, y2: m.t + ih, stroke: css("--axis"), "stroke-width": 1 });
+        el("text", { x: sx(v.x) + 4, y: m.t - 10, class: "v-label" }).textContent = v.label;
+      });
+      // series
+      const endLabels = [];
+      opt.series.forEach((s) => {
+        const color = css(s.color);
+        let d = "", pen = false;
+        s.points.forEach((p, i) => {
+          if (p.y == null) { pen = false; return; }
+          const X = sx(p.x), Y = sy(p.y);
+          if (s.step && pen) {
+            d += `H${X}V${Y}`;
+          } else {
+            d += (pen ? "L" : "M") + X + "," + Y;
+          }
+          pen = true;
+          if (s.step && i === s.points.length - 1) d += `H${sx(opt.x[1])}`;
+        });
+        el("path", { d, fill: "none", stroke: color, "stroke-width": s.width || 2, "stroke-linejoin": "round", "stroke-linecap": "round", "stroke-dasharray": s.dash || "none" });
+        if (!s.step) {
+          s.points.forEach((p) => {
+            if (p.y == null) return;
+            el("circle", { cx: sx(p.x), cy: sy(p.y), r: 3.5, fill: color, stroke: css("--surface"), "stroke-width": 2 });
+          });
+        }
+        if (s.endLabel) {
+          const last = [...s.points].reverse().find((p) => p.y != null);
+          if (last) {
+            endLabels.push({ x: (s.step ? sx(opt.x[1]) : sx(last.x)) + 8, y: sy(last.y) + 4, text: s.endLabel });
+          }
+        }
+      });
+      // end labels: keep at least 13px apart vertically so close line endings stay readable
+      endLabels.sort((a, b) => a.y - b.y);
+      endLabels.forEach((l, i) => { if (i && l.y - endLabels[i - 1].y < 13) l.y = endLabels[i - 1].y + 13; });
+      endLabels.forEach((l) => { el("text", { x: l.x, y: l.y, class: "end-label" }).textContent = l.text; });
+      cross = el("line", { y1: m.t, y2: m.t + ih, stroke: css("--ink-2"), "stroke-width": 1, opacity: 0 });
+      const ov = el("rect", { x: m.l, y: m.t, width: iw, height: ih, class: "overlay", tabindex: 0, "aria-label": opt.aria + ". Use arrow keys to step through weeks." });
+      ov.addEventListener("pointermove", (e) => {
+        const r = svg.getBoundingClientRect();
+        const px = ((e.clientX - r.left) / r.width) * W;
+        let best = 0;
+        xs.forEach((x, i) => { if (Math.abs(sx(x) - px) < Math.abs(sx(xs[best]) - px)) best = i; });
+        show(best);
+      });
+      ov.addEventListener("pointerleave", hide);
+      ov.addEventListener("blur", hide);
+      ov.addEventListener("focus", () => show(active < 0 ? 0 : active));
+      ov.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowRight") { show(Math.min(xs.length - 1, active + 1)); e.preventDefault(); }
+        if (e.key === "ArrowLeft") { show(Math.max(0, active - 1)); e.preventDefault(); }
+        if (e.key === "Escape") hide();
+      });
+      host.replaceChildren(svg, tip);
+      if (active >= 0) show(active);
+    }
+
+    function show(i) {
+      active = i;
+      const x = xs[i];
+      cross.setAttribute("x1", sx(x)); cross.setAttribute("x2", sx(x)); cross.setAttribute("opacity", 0.35);
+      const rows = opt.series.map((s) => {
+        const p = s.step
+          ? [...s.points].reverse().find((q) => q.x <= x + 1e-9 && q.y != null)
+          : s.points.find((q) => Math.abs(q.x - x) < 1e-6);
+        return `<div class="t-row"><span><i class="dot" style="background:${css(s.color)}"></i>${s.label}</span><b>${p && p.y != null ? opt.yFmt(p.y, true) : "–"}</b></div>`;
+      }).join("");
+      const extra = opt.tipExtra ? opt.tipExtra(x) : "";
+      tip.innerHTML = `<div class="t-head">Week from ${day(x)}</div>${rows}${extra ? `<div class="t-note">${extra}</div>` : ""}`;
+      tip.hidden = false;
+      const hostW = host.clientWidth, scale = hostW / W;
+      let left = sx(x) * scale + 12;
+      if (left + tip.offsetWidth > hostW) left = sx(x) * scale - tip.offsetWidth - 12;
+      tip.style.left = Math.max(0, left) + "px";
+      tip.style.top = "8px";
+    }
+    function hide() { tip.hidden = true; if (cross) cross.setAttribute("opacity", 0); }
+
+    render();
+    let raf;
+    new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); }).observe(host);
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener && mq.addEventListener("change", render);
+    new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  }
+
+  function legend(host, items) {
+    host.innerHTML = items.map((it) => {
+      const sw = it.kind === "rule" ? `<i class="swatch rule"></i>`
+        : it.kind === "vline" ? `<i class="swatch vline"></i>`
+        : `<i class="swatch" style="background:var(${it.color})"></i>`;
+      return `<span>${sw}${it.label}</span>`;
+    }).join("");
+  }
+
+  function table(host, head, rows, numCols = []) {
+    host.innerHTML = `<table><thead><tr>${head.map((h, i) => `<th${numCols.includes(i) ? ' class="num"' : ""}>${h}</th>`).join("")}</tr></thead><tbody>` +
+      rows.map((r) => `<tr${r.cls ? ` class="${r.cls}"` : ""}>${r.cells.map((c, i) => `<td${numCols.includes(i) ? ' class="num"' : ""}>${c}</td>`).join("")}</tr>`).join("") +
+      `</tbody></table>`;
+  }
+
+  const days = D.steps.map((s) => s.day);
+  const xDom = [Math.min(...days) - 2, M.end_day];
+  const firstTick = Math.ceil(xDom[0] / 10) * 10;
+  const xTicks = [];
+  for (let t = firstTick; t <= xDom[1]; t += 10) xTicks.push(t);
+  const promotions = D.steps.filter((s) => s.promoted).map((s) => ({ x: s.day, label: "v" + s.challenger }));
+  const vlines = [{ x: D.steps[0].day, label: "v" + D.steps[0].champion }, ...promotions];
+
+  // ---------------------------------------------------------------- performance chart
+  const served = D.weekly.map((w) => ({ x: w.day, y: w.pr_auc }));
+  const live = D.steps.map((s) => ({ x: s.day, y: s.live_pr_auc }));
+  const thr = D.steps.map((s) => ({ x: s.day, y: s.threshold }));
+  const perfVals = [...served, ...live, ...thr].map((p) => p.y).filter((v) => v != null);
+  const yLo = Math.max(0, Math.floor((Math.min(...perfVals) - 0.03) * 10) / 10);
+  const yHi = Math.min(1, Math.ceil((Math.max(...perfVals) + 0.03) * 10) / 10);
+  const yTicks = [];
+  for (let t = yLo; t <= yHi + 1e-9; t += 0.1) yTicks.push(Math.round(t * 10) / 10);
+
+  $("perf-sub").textContent =
+    `Served is the PR-AUC of the transactions the live model scored each week, computed after all labels arrived. ` +
+    `Monitored is what the loop could measure at the time, on labels at least ${M.label_delay} days old. ` +
+    `A monitored value under the safety-net line would trigger an early retrain.`;
+  legend($("perf-legend"), [
+    { color: "--s1", label: "Served PR-AUC (weekly)" },
+    { color: "--s2", label: "Monitored PR-AUC (delayed labels)" },
+    { kind: "rule", label: "Safety-net line" },
+    { kind: "vline", label: "Model promoted" },
+  ]);
+  lineChart($("perf-chart"), {
+    aria: "PR-AUC over time for the served model, the monitored estimate and the safety-net threshold",
+    x: xDom, y: [yLo, yHi], xTicks, yTicks, yFmt: (v, precise) => v.toFixed(precise ? 3 : 1),
+    vlines,
+    series: [
+      { label: "Served", color: "--s1", points: served, endLabel: "Served" },
+      { label: "Monitored", color: "--s2", points: live, endLabel: "Monitored" },
+      { label: "Safety net", color: "--muted", points: thr, step: true, width: 1, dash: "4 4", endLabel: "Safety net" },
+    ],
+    tipExtra: (x) => {
+      const s = D.steps.find((q) => Math.abs(q.day - x) < 1e-6);
+      if (!s) return "";
+      const bits = [`Champion v${s.champion}`];
+      if (s.retrain) bits.push(s.promoted ? `promoted v${s.challenger}` : `rejected v${s.challenger}`);
+      return bits.join(" · ");
+    },
+  });
+  table($("perf-table"), ["Week from", "Model", "Transactions", "Fraud rate", "Served PR-AUC", "Monitored PR-AUC", "Safety net"],
+    D.weekly.map((w, i) => {
+      const s = D.steps[i] || {};
+      return { cells: [day(w.day), "v" + w.model_version, w.n.toLocaleString(), (w.fraud_rate * 100).toFixed(2) + "%", f3(w.pr_auc), f3(s.live_pr_auc), f3(s.threshold)] };
+    }), [2, 3, 4, 5, 6]);
+
+  // ---------------------------------------------------------------- drift chart
+  const scorePsi = D.steps.map((s) => ({ x: s.day, y: s.score_psi }));
+  const featPsi = D.steps.map((s) => ({ x: s.day, y: s.max_feature_psi }));
+  const psiMax = Math.max(0.3, ...[...scorePsi, ...featPsi].map((p) => p.y || 0)) * 1.1;
+  const psiTop = Math.ceil(psiMax * 10) / 10;
+  const psiTicks = [];
+  for (let t = 0; t <= psiTop + 1e-9; t += 0.1) psiTicks.push(Math.round(t * 10) / 10);
+  const alertSteps = D.steps.filter((s) => s.alerts.some((a) => a.startsWith("feature_drift") || a.startsWith("score_drift")));
+  $("drift-sub").textContent =
+    `Population Stability Index against the champion's training data: of its scores, and of the most shifted of its ` +
+    `top ${M.psi_features} numeric features. Drift is logged but never triggers retraining; in the thesis experiments it stayed low while performance fell. ` +
+    (alertSteps.length ? `Alerts: ${alertSteps.map((s) => `${day(s.day)} (${s.top_feature})`).join(", ")}.` : "No alerts.");
+  legend($("drift-legend"), [
+    { color: "--s3", label: "Score PSI" },
+    { color: "--s4", label: "Max feature PSI" },
+    { kind: "rule", label: "0.1 moderate · 0.25 major shift" },
+  ]);
+  lineChart($("drift-chart"), {
+    aria: "Population Stability Index of model scores and of the most shifted feature over time",
+    x: xDom, y: [0, psiTop], xTicks, yTicks: psiTicks, yFmt: (v, precise) => v.toFixed(precise ? 3 : 1),
+    refs: [{ y: 0.1, label: "moderate" }, { y: M.psi_alert, label: "major" }],
+    series: [
+      { label: "Score PSI", color: "--s3", points: scorePsi, endLabel: "Score" },
+      { label: "Max feature PSI", color: "--s4", points: featPsi, endLabel: "Feature" },
+    ],
+    tipExtra: (x) => {
+      const s = D.steps.find((q) => Math.abs(q.day - x) < 1e-6);
+      return s && s.top_feature ? `Most shifted feature: ${s.top_feature}` : "";
+    },
+  });
+  table($("drift-table"), ["Week from", "Score PSI", "Max feature PSI", "Feature", "Alert"],
+    D.steps.map((s) => ({ cells: [day(s.day), f3(s.score_psi), f3(s.max_feature_psi), esc(s.top_feature || "–"),
+      s.alerts.filter((a) => a.includes("drift")).map(esc).join(", ") || "–"] })), [1, 2]);
+
+  // ---------------------------------------------------------------- decision log
+  const pill = (cls, icon, text) => `<span class="pill ${cls}"><i aria-hidden="true">${icon}</i>${text}</span>`;
+  table($("log-table"), ["Day", "Champion", "Monitored", "Signals", "Action"],
+    D.steps.map((s) => {
+      const signals = [];
+      if (s.alerts.includes("performance_drop")) signals.push(pill("serious", "▼", "Performance drop"));
+      s.alerts.filter((a) => a.includes("drift")).forEach((a) => signals.push(pill("info", "!", esc(a.replace("feature_drift:", "Drift: ").replace("score_drift", "Score drift")))));
+      let action = `<span class="muted">No action</span>`;
+      if (s.retrain) {
+        const kind = s.reason.startsWith("safety") ? "Safety-net retrain" : "Scheduled retrain";
+        const gate = s.promoted
+          ? pill("good", "✓", `Promoted v${s.challenger}`)
+          : pill("critical", "✕", `Rejected v${s.challenger}`);
+        let delta = "";
+        if (s.gate_challenger != null && s.gate_champion != null) {
+          const d = s.gate_challenger - s.gate_champion;
+          delta = `<div class="why">${kind}: ${f3(s.gate_challenger)} vs ${f3(s.gate_champion)} on unseen data (<span class="${d >= 0 ? "delta-up" : "delta-down"}">${d >= 0 ? "+" : ""}${d.toFixed(3)}</span>)</div>`;
+        } else {
+          delta = `<div class="why">${kind}: ${esc(s.gate_text)}</div>`;
+        }
+        action = gate + delta;
+        if (s.fault) signals.push(pill("serious", "⚠", "Injected fault: " + esc(s.fault.replace(/_/g, " "))));
+      }
+      return {
+        cls: s.retrain ? "event" : "",
+        cells: [Math.round(s.day), `<span class="mono">v${s.champion}</span>`, f3(s.live_pr_auc),
+          signals.join(" ") || `<span class="muted">–</span>`, action],
+      };
+    }), [0, 2]);
+
+  // ---------------------------------------------------------------- versions
+  table($("ver-table"), ["Version", "Trained on", "Val PR-AUC", "Served", "Status"],
+    D.versions.map((v) => {
+      const status = v.alias === "champion" ? pill("good", "●", "Champion")
+        : v.rejected ? pill("critical", "✕", "Rejected")
+        : v.alias === "previous" ? pill("neutral", "↺", "Previous (rollback)")
+        : pill("neutral", "–", "Retired");
+      return {
+        cells: [`<span class="mono">v${v.version}</span>`,
+          v.train_lo != null ? `days ${Math.round(v.train_lo)}–${Math.round(v.train_hi)}` : "–",
+          f3(v.val_pr_auc), v.served_days ? `${Math.round(v.served_days)} d` : "–", status],
+      };
+    }), [2, 3]);
+
+  $("footer").innerHTML =
+    `<span>Generated ${esc(M.generated)} with <span class="mono">python -m fraud_mlops dashboard</span></span>` +
+    `<span>Browse runs: <span class="mono">mlflow ui --backend-store-uri ${esc(M.tracking_uri)}</span></span>`;
+})();
+</script>

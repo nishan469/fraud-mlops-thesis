@@ -29,7 +29,8 @@ from .training import train_on_window
 
 
 class ReplayRunner:
-    """`faults` ({retrain number: Fault}, 1 = first retrain after the initial model) and
+    """`faults` ({scheduled retrain number: Fault}, 1 = first scheduled retrain; safety-net
+    retrains are never faulted and don't shift the numbering) and
     `gate_enabled=False` exist for the gate experiments (gate_fault_test.py); `model_cache`
     (a dict shared across runners) avoids retraining identical windows between scenarios."""
 
@@ -92,7 +93,7 @@ class ReplayRunner:
 
         champion, _ = self._train(t0, "initial")
         self.registry.promote(champion.version, "initial model")
-        last_retrain, n_retrains = t0, 0
+        last_retrain, n_scheduled = t0, 0
         served, decisions, last_served, last_scores = [], [], None, None
 
         for now in steps:
@@ -103,8 +104,10 @@ class ReplayRunner:
 
             if decision.retrain:
                 self.log(f"day {now:.1f}: {decision.reason}")
-                n_retrains += 1
-                fault = self.faults.get(n_retrains)
+                fault = None
+                if decision.reason.startswith("scheduled"):
+                    n_scheduled += 1
+                    fault = self.faults.get(n_scheduled)
                 challenger, gate_store = self._train(now, decision.reason, fault, champion)
                 gate = self.gate.evaluate(gate_store, challenger, champion)
                 if not self.gate_enabled:

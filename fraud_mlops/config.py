@@ -41,6 +41,8 @@ class PolicyConfig:
     retrain_every_days: float = 14
     train_window_days: float = 60
     safety_net_tol: float = 0.30
+    history_window: int = 4
+    min_lift: float = 3.0
     monitor_days: float = 14
     cooldown_days: float = 7
     min_positives: int = 30

@@ -1,12 +1,22 @@
 """Monitoring the champion. Performance on matured (delayed) labels drives the safety net;
 score and feature PSI are recorded as information only, because in the thesis experiments
-they stayed low while performance fell (they never fired)."""
+they stayed low while performance fell (they never fired).
+
+The safety net never trusts only the champion's own validation PR-AUC as its reference: a
+model trained on corrupted labels reports a corrupted (near-random) validation score, so live
+performance at the same level looked "normal" (gate_fault_test.py, upstream label fault).
+Two independent checks cover that case:
+  performance_drop  live < (1 - tol) x max(own val PR-AUC, median of recent live PR-AUC)
+  no_skill          live < min_lift x fraud rate of the matured window (random ~ fraud rate)
+"""
 
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from .metrics import pr_auc, psi
+
+SAFETY_NET_ALERTS = ("performance_drop", "no_skill")
 
 
 @dataclass
@@ -17,18 +27,24 @@ class MonitorReport:
     matured_rows: int = 0
     matured_positives: int = 0
     live_pr_auc: float = float("nan")
-    ref_pr_auc: float = float("nan")
+    ref_pr_auc: float = float("nan")          # effective reference used by the safety net
+    own_val_pr_auc: float = float("nan")      # champion's own validation PR-AUC
+    history_pr_auc: float = float("nan")      # median of recent live PR-AUC
+    matured_fraud_rate: float = float("nan")
     score_psi: float = float("nan")
     feature_psi: dict = field(default_factory=dict)
     alerts: list = field(default_factory=list)
 
     @property
-    def performance_drop(self):
-        return "performance_drop" in self.alerts
+    def safety_net(self):
+        """Alerts that justify an early retrain."""
+        return [a for a in self.alerts if a in SAFETY_NET_ALERTS]
 
     def metrics(self):
         """Flat numeric dict for MLflow."""
         out = {"live_pr_auc": self.live_pr_auc, "ref_pr_auc": self.ref_pr_auc,
+               "own_val_pr_auc": self.own_val_pr_auc, "history_pr_auc": self.history_pr_auc,
+               "matured_fraud_rate": self.matured_fraud_rate,
                "score_psi": self.score_psi, "matured_rows": self.matured_rows,
                "matured_positives": self.matured_positives,
                "max_feature_psi": max(self.feature_psi.values(), default=float("nan"))}
@@ -37,25 +53,40 @@ class MonitorReport:
 
 
 class Monitor:
+    """Stateful across a run: keeps the recent live PR-AUC history for the safety net."""
+
     def __init__(self, policy_cfg, monitoring_cfg):
         self.p, self.m = policy_cfg, monitoring_cfg
+        self.history = []          # live PR-AUC measurements, oldest first, across champions
+
+    def reference(self, own_val):
+        recent = [v for v in self.history[-self.p.history_window:] if v == v]
+        hist = float(np.median(recent)) if recent else float("nan")
+        known = [v for v in (own_val, hist) if v == v]
+        return (max(known) if known else float("nan")), hist
 
     def check(self, store, champion, now, last_served=None, last_scores=None):
         """`last_served` is the row slice most recently scored, `last_scores` its scores."""
         until = now - self.p.label_delay_days
         start = max(champion.spec["train_hi"], until - self.p.monitor_days)
+        own = champion.spec["val_pr_auc"]
+        ref, hist = self.reference(own)
         rep = MonitorReport(day=now, matured_from=start, matured_until=until,
-                            ref_pr_auc=champion.spec["val_pr_auc"])
+                            ref_pr_auc=ref, own_val_pr_auc=own, history_pr_auc=hist)
 
         # 1) performance on labels that have matured and that the champion did not train on
         if until > start:
             rows = store.rows(start, until)
             y = store.y[rows]
             rep.matured_rows, rep.matured_positives = int(len(y)), int(y.sum())
+            rep.matured_fraud_rate = float(y.mean()) if len(y) else float("nan")
             if rep.matured_positives >= self.p.min_positives:
                 rep.live_pr_auc = pr_auc(y, champion.predict(store.X(rows)))
-                if rep.live_pr_auc < rep.ref_pr_auc * (1 - self.p.safety_net_tol):
+                if rep.live_pr_auc < ref * (1 - self.p.safety_net_tol):
                     rep.alerts.append("performance_drop")
+                if rep.live_pr_auc < self.p.min_lift * rep.matured_fraud_rate:
+                    rep.alerts.append("no_skill")
+                self.history.append(rep.live_pr_auc)
 
         # 2) drift of scores and top features on the latest traffic (informational)
         if last_scores is not None and champion.val_scores is not None:

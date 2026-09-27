@@ -42,6 +42,28 @@ def test_policy_schedule_and_safety_net(cfg):
     assert policy.training_window(100) == (50, 90)                        # delay 10, window 40
 
 
+def test_no_skill_triggers_safety_net(cfg):
+    rep = MonitorReport(day=0, matured_from=0, matured_until=0, live_pr_auc=0.05,
+                        ref_pr_auc=0.06, matured_fraud_rate=0.04, alerts=["no_skill"])
+    decision = RetrainPolicy(cfg.policy).decide(100, 92, rep)
+    assert decision.retrain and "no skill" in decision.reason
+
+
+def test_safety_net_reference_ignores_corrupted_self_report(store, cfg):
+    """A model trained on shuffled labels reports a near-random validation PR-AUC; judged
+    against that alone it looks healthy. Recent live history and the no-skill check catch it."""
+    from fraud_mlops.faults import Fault, FaultyStore
+    bad = train_on_window(FaultyStore(store, Fault("s", "label_shuffle"), 0, 50), 0, 50,
+                          cfg.model, n_ref_sample=1000)
+    monitor = Monitor(cfg.policy, cfg.monitoring)
+    fresh = monitor.check(store, bad, now=80)
+    assert fresh.ref_pr_auc == bad.spec["val_pr_auc"]            # no history yet
+    monitor.history = [0.5, 0.45, 0.55]                          # healthy production so far
+    rep = monitor.check(store, bad, now=80)
+    assert rep.history_pr_auc == 0.5 and rep.ref_pr_auc == 0.5
+    assert "performance_drop" in rep.alerts and "no_skill" in rep.alerts
+
+
 def test_training_and_gate(store, cfg):
     champion = train_on_window(store, 0, 50, cfg.model, n_ref_sample=1000)
     assert 0 < champion.threshold < 1

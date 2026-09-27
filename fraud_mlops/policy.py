@@ -15,7 +15,8 @@ class Decision:
 
 class RetrainPolicy:
     """Primary: retrain every `retrain_every_days` (schedule on a sliding window).
-    Safety net: retrain early on a sharp live performance drop, respecting a cooldown."""
+    Safety net: retrain early on a sharp live performance drop or a model with no skill,
+    respecting a cooldown (see monitoring.py for how both are measured)."""
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -24,9 +25,15 @@ class RetrainPolicy:
         since = now - last_retrain_day
         if since >= self.cfg.retrain_every_days - 1e-9:
             return Decision(True, f"scheduled ({since:.0f}d since last retrain)")
-        if report is not None and report.performance_drop and since >= self.cfg.cooldown_days - 1e-9:
-            return Decision(True, f"safety net: live PR-AUC {report.live_pr_auc:.3f} < "
-                                  f"{1 - self.cfg.safety_net_tol:.2f} x ref {report.ref_pr_auc:.3f}")
+        if report is not None and report.safety_net and since >= self.cfg.cooldown_days - 1e-9:
+            why = []
+            if "performance_drop" in report.alerts:
+                why.append(f"live PR-AUC {report.live_pr_auc:.3f} < "
+                           f"{1 - self.cfg.safety_net_tol:.2f} x ref {report.ref_pr_auc:.3f}")
+            if "no_skill" in report.alerts:
+                why.append(f"live PR-AUC {report.live_pr_auc:.3f} < {self.cfg.min_lift:g} x "
+                           f"fraud rate {report.matured_fraud_rate:.3f} (no skill)")
+            return Decision(True, "safety net: " + "; ".join(why))
         return Decision(False)
 
     def training_window(self, now):

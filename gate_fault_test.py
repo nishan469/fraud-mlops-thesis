@@ -3,7 +3,7 @@ IEEE-CIS Fraud Detection: does the promotion gate stop bad models? (fault inject
 Thesis: A Drift-Aware Continuous Learning MLOps Framework for Financial Fraud Detection
 
 Replays the full framework (fraud_mlops) on the real stream with faults injected into
-selected retraining jobs (default: the 2nd and 4th retrain), once with the promotion gate
+selected retraining jobs (default: the 2nd and 4th scheduled retrain), once with the promotion gate
 on and once with it off, and compares both with a clean run.
 
 Faults (fraud_mlops/faults.py):
@@ -39,7 +39,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/default.toml")
     ap.add_argument("--out_dir", default="outputs/gate_test")
-    ap.add_argument("--retrains", default="2,4", help="retrain numbers that receive the fault")
+    ap.add_argument("--retrains", default="2,4",
+                    help="scheduled retrain numbers that receive the fault")
     ap.add_argument("--scenarios", default=",".join(SCENARIOS))
     args = ap.parse_args()
     os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")

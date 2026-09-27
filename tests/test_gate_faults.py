@@ -73,3 +73,7 @@ def test_replay_with_fault(store, cfg, gate_enabled):
         assert (decisions["champion"] != faulty["challenger"]).all()
     else:
         assert bool(faulty["promoted"]) and "would reject" in faulty["gate"]
+        # the safety net replaces the no-skill model at the next step (cooldown = step)
+        after = decisions[decisions["day"] > faulty["day"]].iloc[0]
+        assert after["retrain"] and after["reason"].startswith("safety net")
+        assert "no_skill" in after["alerts"]

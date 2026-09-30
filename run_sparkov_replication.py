@@ -11,6 +11,11 @@ the same scripts and settings as for IEEE-CIS, with the stream starting at row f
 Outputs go to outputs/sparkov/<step>/ and a log per step to outputs/sparkov/logs/.
   python run_sparkov_replication.py            # everything (a few hours)
   python run_sparkov_replication.py --from sweep   # resume from a step
+
+After an interruption (e.g. a power cut), rerun with --from <the unfinished step>. The long
+steps (sweep, walkforward, seeds) run with --resume: they keep every label delay or seed
+already saved and continue with the rest, so little work is lost. To recompute a step from
+scratch, delete its folder under outputs/sparkov/ first.
 """
 
 import argparse
@@ -25,12 +30,12 @@ STEPS = [
     ("baseline", ["ieee_cis_eda_baseline.py", "--data_dir", DATA, "--out_dir", f"{OUT}/baseline",
                   "--n_bins", "10"]),
     ("sweep", ["sweep_label_delay.py", "--data_dir", DATA, "--stream_start_frac", START,
-               "--out_dir", f"{OUT}/sweep", "--delays", "0,15,30,60", "--n_boot", "500"]),
+               "--out_dir", f"{OUT}/sweep", "--delays", "0,15,30,60", "--n_boot", "500", "--resume"]),
     ("walkforward", ["walkforward_tuning.py", "--data_dir", DATA, "--stream_start_frac", START,
                      "--tune_start_frac", "0.35", "--out_dir", f"{OUT}/walkforward",
-                     "--delays", "0,15,30"]),
+                     "--delays", "0,15,30", "--resume"]),
     ("seeds", ["seed_robustness.py", "--data_dir", DATA, "--stream_start_frac", START,
-               "--out_dir", f"{OUT}/seeds", "--seeds", "42,1,2,3,4", "--delays", "0,30"]),
+               "--out_dir", f"{OUT}/seeds", "--seeds", "42,1,2,3,4", "--delays", "0,30", "--resume"]),
     ("replay", ["-m", "fraud_mlops", "--config", "configs/sparkov.toml", "replay"]),
     ("dashboard", ["-m", "fraud_mlops", "--config", "configs/sparkov.toml", "dashboard"]),
 ]

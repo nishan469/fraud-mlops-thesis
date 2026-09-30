@@ -22,6 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from resume_utils import check_settings, load_saved
 from retraining_simulation import build_parser, load_trainer, simulate
 
 CONFIGS = {
@@ -46,19 +47,35 @@ def main():
     ap.set_defaults(out_dir="./outputs/seeds")
     ap.add_argument("--seeds", default="42,1,2,3,4")
     ap.add_argument("--delays", default="0,30")
+    ap.add_argument("--resume", action="store_true",
+                    help="keep seed/delay runs already saved in out_dir and run only the rest")
     args, _ = ap.parse_known_args()
     args.verbose = False
     os.makedirs(args.out_dir, exist_ok=True)
+    check_settings(args.out_dir, args)
 
     trainer = load_trainer(args)
     day = trainer.day
     t0 = float(day[int(len(day) * args.stream_start_frac)])
     steps = np.arange(t0, day.max(), args.step_days)
 
-    runs = []
+    # a seed/delay pair counts as done only when every configuration was saved for it
+    saved = load_saved(args.out_dir, "seed_runs.csv", args.resume)
+    done = set()
+    if len(saved):
+        n = saved.groupby(["seed", "label_delay"])["config"].nunique()
+        done = {(int(s), float(d)) for (s, d), k in n.items() if k == len(CONFIGS)}
+        saved = saved[[(int(s), float(d)) in done
+                       for s, d in zip(saved["seed"], saved["label_delay"])]]
+        print(f"Resuming: {len(done)} seed/delay pairs already done")
+    runs = saved.to_dict("records")
+
     for seed in [int(s) for s in args.seeds.split(",")]:
+        pending = [float(d) for d in args.delays.split(",") if (seed, float(d)) not in done]
+        if not pending:
+            continue
         trainer.set_seed(seed)
-        for delay in [float(d) for d in args.delays.split(",")]:
+        for delay in pending:
             args.label_delay = delay
             print(f"\n=== seed {seed}, label delay {delay:g}d ===")
             initial = trainer.fit(-np.inf, t0 - delay, trained_at=t0)

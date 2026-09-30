@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from resume_utils import check_settings, load_saved
 from retraining_simulation import build_parser, load_trainer, simulate
 from sweep_label_delay import bootstrap, mean_window_pr_auc, window_ids
 
@@ -178,9 +179,12 @@ def main():
                     help="PR-AUC penalty per retrain (per 4 weeks, averaged)")
     ap.add_argument("--n_boot", type=int, default=500)
     ap.add_argument("--smoke", action="store_true", help="tiny grid for a quick pipeline check")
+    ap.add_argument("--resume", action="store_true",
+                    help="keep label delays already saved in out_dir and run only the rest")
     args, _ = ap.parse_known_args()
     args.verbose = False
     os.makedirs(args.out_dir, exist_ok=True)
+    check_settings(args.out_dir, args)
 
     trainer = load_trainer(args)
     day, y_all = trainer.day, trainer.df["isFraud"].values
@@ -199,8 +203,19 @@ def main():
     if args.smoke:
         configs = [c for c in configs if c["config_id"] in (0, 3, 9, 10, 11, 12)]
 
-    all_folds, summary, weekly = [], [], []
-    for delay in [float(d) for d in args.delays.split(",")]:
+    # the summary is written last for each delay, so a delay listed there is complete
+    saved = load_saved(args.out_dir, "wf_summary.csv", args.resume)
+    done = set(saved["label_delay"]) if len(saved) else set()
+    summary = saved.to_dict("records")
+    all_folds = [f[f["label_delay"].isin(done)] for f in
+                 [load_saved(args.out_dir, "wf_folds.csv", args.resume)] if len(f)]
+    w = load_saved(args.out_dir, "wf_weekly.csv", args.resume)
+    weekly = w[w["label_delay"].isin(done)].to_dict("records") if len(w) else []
+    if done:
+        print(f"Resuming: label delays {sorted(done)} already done")
+
+    delays = [float(d) for d in args.delays.split(",")]
+    for delay in [d for d in delays if d not in done]:
         args.label_delay = delay
         print(f"\n=== label delay {delay:g}d ===")
         trainer.cache.clear()
@@ -232,11 +247,13 @@ def main():
                                "day_start": float(day[ev][i].min()),
                                "pr_auc": mean_window_pr_auc(y_all[ev], p, [i])})
 
+        # save after every delay (summary last) so an interruption keeps finished delays
         pd.concat(all_folds).to_csv(os.path.join(args.out_dir, "wf_folds.csv"), index=False)
-        pd.DataFrame(summary).to_csv(os.path.join(args.out_dir, "wf_summary.csv"), index=False)
         pd.DataFrame(weekly).to_csv(os.path.join(args.out_dir, "wf_weekly.csv"), index=False)
+        pd.DataFrame(summary).to_csv(os.path.join(args.out_dir, "wf_summary.csv"), index=False)
 
     summary = pd.DataFrame(summary)
+    summary = summary[summary["label_delay"].isin(delays)]
     plot(summary, os.path.join(args.out_dir, "wf_walkforward.png"))
     pd.set_option("display.width", 250)
     pd.set_option("display.max_colwidth", 80)

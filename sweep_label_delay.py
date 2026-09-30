@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score
 
+from resume_utils import check_settings, load_saved
 from retraining_simulation import build_parser, load_trainer, parse_strategies, run_strategies
 
 SEED = 42
@@ -147,20 +148,35 @@ def main():
     ap.set_defaults(out_dir="./outputs/sweep")
     ap.add_argument("--delays", default="0,15,30,60", help="comma-separated label delays in days")
     ap.add_argument("--n_boot", type=int, default=500)
+    ap.add_argument("--resume", action="store_true",
+                    help="keep label delays already saved in out_dir and run only the rest")
     args, _ = ap.parse_known_args()
     os.makedirs(args.out_dir, exist_ok=True)
+    check_settings(args.out_dir, args)
     strategies = parse_strategies(args.strategies)
     delays = [float(d) for d in args.delays.split(",")]
-    rng = np.random.default_rng(SEED)
 
-    trainer = load_trainer(args)   # load once; its model cache is shared across delays
-    y_all = trainer.df["isFraud"].values
-    results, windows, events = [], [], []
-    for delay in delays:
+    # results are written last for each delay, so a delay listed there is complete
+    saved = load_saved(args.out_dir, "sweep_results.csv", args.resume)
+    done = set(saved["label_delay"]) if len(saved) else set()
+    results = saved.to_dict("records")
+    windows = [w[w["label_delay"].isin(done)] for w in
+               [load_saved(args.out_dir, "sweep_by_window.csv", args.resume)] if len(w)]
+    events = [e[e["label_delay"].isin(done)] for e in
+              [load_saved(args.out_dir, "sweep_events.csv", args.resume)] if len(e)]
+    if done:
+        print(f"Resuming: label delays {sorted(done)} already done")
+
+    todo = [d for d in delays if d not in done]
+    trainer = load_trainer(args) if todo else None   # model cache shared across delays
+    y_all = trainer.df["isFraud"].values if trainer else None
+    for delay in todo:
         args.label_delay = delay
         res = run_strategies(trainer, strategies, args)
         sl = res["stream_slice"]
         print(f"\nBootstrapping ({args.n_boot} reps) for label delay {delay:g}d ...")
+        # seeded per delay, so a resumed delay gets the same intervals as an unbroken run
+        rng = np.random.default_rng((SEED, int(round(delay))))
         results += summarise(delay, res, y_all[sl], trainer.day[sl], args.step_days,
                              args.n_boot, rng)
         # keep raw predictions so the bootstrap can be redone without retraining
@@ -171,12 +187,15 @@ def main():
         windows.append(res["by_window"].assign(label_delay=delay))
         events.append(res["events"].assign(label_delay=delay))
 
-        # save after every delay so a crash late in the sweep keeps earlier results
-        results_df = pd.DataFrame(results)
-        results_df.to_csv(os.path.join(args.out_dir, "sweep_results.csv"), index=False)
+        # save after every delay (results last) so an interruption keeps finished delays
         pd.concat(windows).to_csv(os.path.join(args.out_dir, "sweep_by_window.csv"), index=False)
         pd.concat(events).to_csv(os.path.join(args.out_dir, "sweep_events.csv"), index=False)
+        pd.DataFrame(results).to_csv(os.path.join(args.out_dir, "sweep_results.csv"), index=False)
 
+    results_df = pd.DataFrame(results)
+    order = {d: i for i, d in enumerate(delays)}
+    results_df = results_df[results_df["label_delay"].isin(order)].sort_values(
+        "label_delay", key=lambda s: s.map(order), kind="stable")
     plot(results_df, os.path.join(args.out_dir, "sweep_label_delay.png"))
     cols = ["label_delay", "strategy", "n_retrains", "pr_auc", "pr_auc_lo", "pr_auc_hi",
             "delta_pr_auc_vs_static", "delta_lo", "delta_hi", "p_delta_le_0"]

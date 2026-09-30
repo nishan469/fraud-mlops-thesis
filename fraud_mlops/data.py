@@ -31,9 +31,13 @@ def feature_columns(df):
 
 def load_transactions(data_dir, cache_path=""):
     """train_transaction.csv (+ train_identity.csv if present), time-sorted, categoricals as
-    pandas `category`. Cached to parquet after the first load when cache_path is set."""
+    pandas `category`. Cached to parquet after the first load when cache_path is set.
+    A data_dir holding transactions.parquet (already in this layout) is read directly."""
     if cache_path and os.path.exists(cache_path):
         return pd.read_parquet(cache_path)
+    prepared = os.path.join(data_dir, "transactions.parquet")   # e.g. prepare_sparkov.py
+    if os.path.exists(prepared):
+        return pd.read_parquet(prepared).sort_values(TIME).reset_index(drop=True)
 
     df = reduce_memory(pd.read_csv(os.path.join(data_dir, "train_transaction.csv")))
     id_path = os.path.join(data_dir, "train_identity.csv")

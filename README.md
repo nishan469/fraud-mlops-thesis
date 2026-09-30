@@ -17,8 +17,24 @@ the `fraud_mlops` framework that implements that decision end to end.
 | `tune_drift_trigger.py` | Grid tuning of the drift trigger on a held-out earlier period |
 | `walkforward_tuning.py` | Walk-forward re-tuning every 4 weeks, delays 0/15/30 days |
 | `seed_robustness.py` | Key comparisons repeated over 5 training seeds |
+| `gate_fault_test.py` | Fault injection: does the promotion gate stop bad models? |
+| `prepare_sparkov.py`, `run_sparkov_replication.py` | Second dataset: data preparation and the full replication |
 
 Put `train_transaction.csv` and `train_identity.csv` in `data/`. Install: `pip install -r requirements.txt`.
+
+### Second dataset: Sparkov (replication)
+
+[Credit Card Transactions Fraud Detection](https://www.kaggle.com/datasets/kartik2112/fraud-detection)
+(simulated with Sparkov, 2019-2020). Put `fraudTrain.csv` and `fraudTest.csv` in `data/sparkov/`, then:
+
+```bash
+python run_sparkov_replication.py   # prepare -> baseline -> sweep -> walk-forward -> seeds -> replay
+```
+
+`prepare_sparkov.py` converts it to the same table layout as IEEE-CIS (per-card history
+features use only earlier transactions; data cut at 2020-12-21, where simulated fraud stops),
+so every script above runs on it with `--data_dir data/sparkov`, and the framework with
+`--config configs/sparkov.toml`. Results go to `outputs/sparkov/`.
 
 ## What the experiments found (and why the framework looks like it does)
 

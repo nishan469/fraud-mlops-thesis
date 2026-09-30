@@ -51,6 +51,10 @@ def reduce_memory(df):
 
 
 def load_data(data_dir):
+    prepared = os.path.join(data_dir, "transactions.parquet")   # e.g. prepare_sparkov.py
+    if os.path.exists(prepared):
+        print(f"Loading {prepared} ...")
+        return pd.read_parquet(prepared).sort_values("TransactionDT").reset_index(drop=True)
     tx_path = os.path.join(data_dir, "train_transaction.csv")
     id_path = os.path.join(data_dir, "train_identity.csv")
     print(f"Loading {tx_path} ...")

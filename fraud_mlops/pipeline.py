@@ -3,8 +3,10 @@
 Every `step_days`:
   1. monitor   - champion's live PR-AUC on matured labels, score/feature PSI
   2. decide    - scheduled retrain, or safety-net retrain on a sharp performance drop
-  3. retrain   - train a challenger on the labelled window (sliding, or expanding), register it
-  4. gate      - promote the challenger to `champion` only if it is not worse on unseen data
+  3. retrain   - train a challenger on the labelled window (sliding, or expanding), register it;
+                 with several candidate windows, one challenger per window
+  4. gate      - promote the (best) challenger to `champion` only if it is not worse on unseen
+                 data
   5. serve     - score the next step's transactions with the champion
 Monitoring is logged to an MLflow run (one metric point per step); each training is its own
 MLflow run and registered model version.
@@ -50,10 +52,10 @@ class ReplayRunner:
         self.gate_enabled = gate_enabled
         self.model_cache = model_cache if model_cache is not None else {}
 
-    def _train(self, now, reason, fault=None, champion=None):
-        """Train on the policy's window; with a fault, through a corrupted view of the data.
-        Returns (model, store the gate should read labels from)."""
-        lo, hi = self.policy.training_window(now)
+    def _train(self, now, reason, fault=None, champion=None, window=None):
+        """Train on the policy's window (or `window` days, 0 = expanding); with a fault, through
+        a corrupted view of the data. Returns (model, store the gate should read labels from)."""
+        lo, hi = self.policy.training_window(now, window)
         train_store, gate_store, feats = self.store, self.store, ()
         if fault is not None:
             feats = fault_features(fault, champion)
@@ -72,10 +74,29 @@ class ReplayRunner:
             self.model_cache[key] = copy.copy(model)
         model.version = None
         tags = {"trigger": reason, "replay_day": f"{now:.2f}"}
+        if window is not None:
+            tags["window_days"] = f"{window:g}"
         if fault:
             tags["fault"] = fault.name
         self.registry.register(model, tags=tags)
         return model, gate_store
+
+    def _train_and_select(self, now, reason, windows, fault, champion):
+        """One challenger per candidate window; the gate picks the best and decides on it.
+        Returns (selected challenger, GateResult, its window in days)."""
+        trained = [self._train(now, reason, fault, champion, w) for w in windows]
+        gate_store = trained[0][1]
+        candidates = [m for m, _ in trained]
+        best, gate, scores = self.gate.select(gate_store, candidates, champion)
+        if scores:
+            self.log("  candidates: " + ", ".join(
+                f"{w:g}d {s:.3f}" for w, s in zip(windows, scores)) + f" -> {windows[best]:g}d")
+        for i, m in enumerate(candidates):
+            if i != best:
+                self.registry.reject(m.version, f"window {windows[i]:g}d not selected "
+                                                f"(PR-AUC {scores[i]:.3f})" if scores else
+                                     f"window {windows[i]:g}d not selected")
+        return candidates[best], gate, windows[best]
 
     def run(self, end_day=None):
         cfg, store = self.cfg, self.store
@@ -91,7 +112,11 @@ class ReplayRunner:
         self.registry.client.log_dict(run_id, asdict(cfg), "config.json")
         self.log(f"Replay days {t0:.1f}-{end:.1f} in {len(steps)} steps; MLflow run {run_id}")
 
-        champion, _ = self._train(t0, "initial")
+        windows = self.policy.windows()
+        if len(windows) == 1:
+            champion, _ = self._train(t0, "initial")
+        else:
+            champion, _, _ = self._train_and_select(t0, "initial", windows, None, None)
         self.registry.promote(champion.version, "initial model")
         last_retrain, n_scheduled = t0, 0
         served, decisions, last_served, last_scores = [], [], None, None
@@ -108,8 +133,13 @@ class ReplayRunner:
                 if decision.reason.startswith("scheduled"):
                     n_scheduled += 1
                     fault = self.faults.get(n_scheduled)
-                challenger, gate_store = self._train(now, decision.reason, fault, champion)
-                gate = self.gate.evaluate(gate_store, challenger, champion)
+                if len(windows) == 1:
+                    challenger, gate_store = self._train(now, decision.reason, fault, champion)
+                    gate = self.gate.evaluate(gate_store, challenger, champion)
+                else:
+                    challenger, gate, chosen = self._train_and_select(
+                        now, decision.reason, windows, fault, champion)
+                    row["window_days"] = chosen
                 if not self.gate_enabled:
                     verdict = "pass" if gate.promote else "reject"
                     gate.promote, gate.reason = True, f"gate disabled (would {verdict}: {gate.reason})"
@@ -146,6 +176,10 @@ class ReplayRunner:
                    "promotions": int((decisions.get("promoted", pd.Series(dtype=object)) == True).sum()),
                    "rejections": int((decisions.get("promoted", pd.Series(dtype=object)) == False).sum()),
                    "final_champion": champion.version, "mlflow_run_id": run_id}
+        if "window_days" in decisions:
+            chosen = decisions["window_days"].dropna()
+            summary["windows_selected"] = {f"{w:g}d": int(n) for w, n in
+                                           chosen.value_counts().sort_index().items()}
         ts = int(time.time() * 1000)
         self.registry.client.log_batch(run_id, metrics=[
             Metric("served_pr_auc", float(r.pr_auc), ts, int(round(r.day_start)))

@@ -15,6 +15,8 @@ from .config import load_config
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="fraud_mlops")
     ap.add_argument("--config", default="configs/default.toml")
+    ap.add_argument("--data_dir", help="override [data] data_dir")
+    ap.add_argument("--out_dir", help="override [replay] out_dir")
     sub = ap.add_subparsers(dest="command", required=True)
 
     rp = sub.add_parser("replay", help="replay the stream through monitor/retrain/gate/serve")
@@ -34,6 +36,10 @@ def main(argv=None):
     overrides = {}
     if getattr(args, "label_delay", None) is not None:
         overrides["policy"] = {"label_delay_days": args.label_delay}
+    if args.data_dir:
+        overrides["data"] = {"data_dir": args.data_dir}
+    if args.out_dir:
+        overrides["replay"] = {"out_dir": args.out_dir}
     cfg = load_config(args.config, overrides)
 
     if args.command == "replay":

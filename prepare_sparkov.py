@@ -58,7 +58,8 @@ def card_history_features(df):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data_dir", default="data/sparkov")
+    ap.add_argument("--data_dir", default="data/sparkov", help="folder with the two CSV files")
+    ap.add_argument("--out_dir", help="where to write transactions.parquet (default: data_dir)")
     ap.add_argument("--cutoff", default="2020-12-21", help="drop transactions from this date on")
     args = ap.parse_args()
 
@@ -88,7 +89,8 @@ def main():
     for c in hist.columns:
         out[c] = hist[c].astype("float32")
 
-    path = os.path.join(args.data_dir, "transactions.parquet")
+    os.makedirs(args.out_dir or args.data_dir, exist_ok=True)
+    path = os.path.join(args.out_dir or args.data_dir, "transactions.parquet")
     out.to_parquet(path)
     days = out["TransactionDT"].iloc[-1] / 86400
     print(f"Kept {len(out):,} of {n_all:,} transactions (cut at {args.cutoff}), {days:.0f} days, "

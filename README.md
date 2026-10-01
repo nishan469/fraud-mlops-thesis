@@ -20,6 +20,7 @@ the `fraud_mlops` framework that implements that decision end to end.
 | `gate_fault_test.py` | Fault injection: does the promotion gate stop bad models? |
 | `prepare_sparkov.py`, `run_sparkov_replication.py` | Second dataset: data preparation and the full replication |
 | `prepare_baf.py`, `run_replication.py`, `kaggle_run.ipynb` | Third dataset (BAF); generic replication runner; Kaggle notebook |
+| `run_window_selection.py`, `kaggle_window_selection.ipynb` | Automatic training-window selection vs fixed windows, per dataset (local or Kaggle) |
 
 Put `train_transaction.csv` and `train_identity.csv` in `data/`. Install: `pip install -r requirements.txt`.
 
@@ -51,6 +52,17 @@ python run_replication.py --dataset baf --in_dir path/to/baf   # all steps, outp
 It can be split into two parts to stay within Kaggle's 12-hour limit (see the notebook).
 `run_replication.py --dataset sparkov` runs the Sparkov replication the same way, including
 the expanding-window replay (`configs/sparkov_expanding.toml`).
+
+### Automatic training-window selection
+
+The best training window differed between datasets (the last 60 days on IEEE-CIS, all
+labelled history on Sparkov and BAF), so a fixed window cannot suit every deployment. With
+`[policy] candidate_windows = [60, 0]` the framework trains one challenger per window at every
+retrain, scores them on the same recent rows that none of them trained on, and the promotion
+gate keeps the best (`PromotionGate.select`). `run_window_selection.py --dataset <name>`
+replays static, sliding, expanding and adaptive on one dataset (sharing one model cache) and
+writes `outputs/<name>/window_selection/comparison.csv`; `kaggle_window_selection.ipynb` runs
+it on Kaggle, one dataset per run.
 
 ## What the experiments found (and why the framework looks like it does)
 
@@ -86,7 +98,7 @@ visibility, not used to act.
 | `training.py` | Train LightGBM on a day window; time-ordered hold-out for early stopping, threshold, gate |
 | `model.py` | `FraudModel`: booster + feature spec; scores raw input (missing/extra columns, string categoricals) |
 | `monitoring.py` | Live PR-AUC on matured labels the model never saw; score/feature PSI |
-| `policy.py` | `RetrainPolicy` (schedule + safety net + cooldown), `PromotionGate` |
+| `policy.py` | `RetrainPolicy` (schedule + safety net + cooldown, candidate windows), `PromotionGate` (incl. picking the best window) |
 | `registry.py` | MLflow runs + Model Registry; `champion` / `previous` aliases |
 | `pipeline.py` | `ReplayRunner`: the loop above over the historical stream |
 | `serving.py` | FastAPI app serving the current champion |

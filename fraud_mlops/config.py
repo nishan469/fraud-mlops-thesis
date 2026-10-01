@@ -1,7 +1,7 @@
 """Typed configuration loaded from a TOML file (see configs/default.toml)."""
 
 import tomllib
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 
@@ -40,6 +40,9 @@ class PolicyConfig:
     step_days: float = 7
     retrain_every_days: float = 14
     train_window_days: float = 60
+    # windows tried at every retrain (days, 0 = expanding); the gate keeps the best. Empty:
+    # only train_window_days
+    candidate_windows: list = field(default_factory=list)
     safety_net_tol: float = 0.30
     history_window: int = 4
     min_lift: float = 3.0

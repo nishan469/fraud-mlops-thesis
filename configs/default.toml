@@ -35,6 +35,8 @@ label_delay_days = 30        # labels (chargebacks) become usable this long afte
 step_days = 7                # how often the loop wakes up (monitor, decide, serve)
 retrain_every_days = 14      # primary policy: scheduled retraining
 train_window_days = 60       # sliding window of labelled data used for each training run (0 = expanding: all history)
+candidate_windows = []       # e.g. [60, 0]: train one challenger per window at every retrain and
+                             # let the promotion gate keep the best (empty: train_window_days only)
 safety_net_tol = 0.30        # early retrain if live PR-AUC < (1 - tol) x reference, where
                              # reference = max(champion's val PR-AUC, median of recent live PR-AUC)
 history_window = 4           # recent live measurements (any champion) behind that median

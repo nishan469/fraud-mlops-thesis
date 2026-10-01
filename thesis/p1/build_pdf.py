@@ -2,14 +2,19 @@
 template: unnumbered title page, roman-numbered front matter, 'Chapter N' headings, numbered
 figures and tables, IEEE-numbered bibliography.
 
-  python build_pdf.py   ->  P1_Drift_Aware_Continuous_Learning_MLOps.pdf
+  python build_pdf.py                ->  P1_Drift_Aware_Continuous_Learning_MLOps.pdf (ch. 1-2)
+  python build_pdf.py --chapters 3   ->  Thesis_Draft_Ch1-3.pdf (full draft so far)
 """
 
 import os
 import re
+import sys
+
+N_CHAPTERS = int(sys.argv[sys.argv.index("--chapters") + 1]) if "--chapters" in sys.argv else 2
+os.environ["THESIS_CHAPTERS"] = str(N_CHAPTERS)      # read by content.py
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
@@ -21,7 +26,8 @@ import content as C
 from markup import numbering, resolve
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "P1_Drift_Aware_Continuous_Learning_MLOps.pdf")
+OUT = os.path.join(HERE, "P1_Drift_Aware_Continuous_Learning_MLOps.pdf" if N_CHAPTERS == 2
+                   else f"Thesis_Draft_Ch1-{N_CHAPTERS}.pdf")
 MARGIN = 1.0 * inch
 TEXT_W = A4[0] - 2 * MARGIN
 CITES, FIGS, TABS = numbering()
@@ -41,10 +47,15 @@ S = {
                               spaceBefore=12, spaceAfter=8, keepWithNext=1),
     "caption": ParagraphStyle("caption", fontName=BASE, fontSize=11, leading=14,
                               alignment=TA_CENTER, spaceBefore=6, spaceAfter=14),
+    "tcaption": ParagraphStyle("tcaption", fontName=BASE, fontSize=11, leading=14,
+                               alignment=TA_CENTER, spaceBefore=6, spaceAfter=8, keepWithNext=1),
     "cell": ParagraphStyle("cell", fontName=BASE, fontSize=9, leading=11, alignment=TA_LEFT),
     "cellh": ParagraphStyle("cellh", fontName=BOLD, fontSize=9, leading=11, alignment=TA_LEFT),
     "ref": ParagraphStyle("ref", fontName=BASE, fontSize=11, leading=14.5, leftIndent=30,
                           firstLineIndent=-30, spaceAfter=7, alignment=TA_LEFT),
+    "eq": ParagraphStyle("eq", fontName=BASE, fontSize=12.5, leading=18, alignment=TA_CENTER),
+    "eqnum": ParagraphStyle("eqnum", fontName=BASE, fontSize=12, leading=18,
+                            alignment=TA_RIGHT),
     "center": ParagraphStyle("center", fontName=BASE, fontSize=12, leading=17,
                              alignment=TA_CENTER),
     "left": ParagraphStyle("left", fontName=BASE, fontSize=12, leading=17, alignment=TA_LEFT),
@@ -285,16 +296,23 @@ def table(story, key):
         ("LINEBELOW", (0, -1), (-1, -1), 1, colors.black),
         ("LINEBELOW", (0, 1), (-1, -2), 0.25, colors.HexColor("#BBBBBB")),
         ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
-    story.append(Entry(f"Table {label}: {esc(spec['caption'])}", S["caption"], kind="LOTEntry",
+    story.append(Entry(f"Table {label}: {esc(spec['caption'])}", S["tcaption"], kind="LOTEntry",
                        entry=f"{label}&nbsp;&nbsp;&nbsp;{esc(spec['caption'])}"))
     story.append(t)
     story.append(Spacer(1, 10))
 
 
-def chapter(story, num, ch):
-    story.append(PageBreak())
-    story.append(Paragraph(f"Chapter {num}", S["chapnum"]))
-    story.append(Entry(ch["title"], S["chaptitle"], entry=f"{num}&nbsp;&nbsp;{ch['title']}"))
+def equation(story, key):
+    html = C.EQUATIONS[key][1]
+    num = TABS["eq:" + key]
+    t = Table([[Paragraph(html, S["eq"]), Paragraph(f"({num})", S["eqnum"])]],
+              colWidths=[TEXT_W - 0.8 * inch, 0.8 * inch])
+    t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                           ("LEFTPADDING", (0, 0), (0, 0), 0.8 * inch)]))
+    story += [Spacer(1, 2), t, Spacer(1, 8)]
+
+
+def blocks(story, num, ch):
     for s, sec in enumerate(ch["sections"], start=1):
         story.append(Entry(f"{num}.{s}&nbsp;&nbsp;&nbsp;{sec['title']}", S["section"], level=1,
                            entry=f"{num}.{s}&nbsp;&nbsp;{sec['title']}"))
@@ -312,6 +330,17 @@ def chapter(story, num, ch):
                 figure(story, block[1])
             elif kind == "table":
                 table(story, block[1])
+            elif kind == "eq":
+                equation(story, block[1])
+
+
+def chapter(story, num, ch, page_break=True):
+    """Chapter 1 starts on the page after the front matter (no extra page break)."""
+    if page_break:
+        story.append(PageBreak())
+    story.append(Paragraph(f"Chapter {num}", S["chapnum"]))
+    story.append(Entry(ch["title"], S["chaptitle"], entry=f"{num}&nbsp;&nbsp;{ch['title']}"))
+    blocks(story, num, ch)
 
 
 def bibliography(story):
@@ -330,40 +359,13 @@ def main():
     listings(story)
     story.append(MainStart())
     for i, ch in enumerate(C.CHAPTERS, start=1):
-        if i == 1:
-            story.append(Paragraph(f"Chapter {i}", S["chapnum"]))
-            story.append(Entry(ch["title"], S["chaptitle"],
-                               entry=f"{i}&nbsp;&nbsp;{ch['title']}"))
-            chapter_body = dict(ch)
-            _sections(story, i, chapter_body)
-        else:
-            chapter(story, i, ch)
+        chapter(story, i, ch, page_break=i > 1)
     bibliography(story)
     doc = Doc(OUT)
     for listing in LISTINGS:
         listing.formatter = doc.label     # absolute page -> roman/arabic label
     doc.multiBuild(story)
     print(f"Wrote {OUT} ({doc.page} pages)")
-
-
-def _sections(story, num, ch):
-    """Chapter 1 starts on the page after the front matter (no extra page break)."""
-    for s, sec in enumerate(ch["sections"], start=1):
-        story.append(Entry(f"{num}.{s}&nbsp;&nbsp;&nbsp;{sec['title']}", S["section"], level=1,
-                           entry=f"{num}.{s}&nbsp;&nbsp;{sec['title']}"))
-        for block in sec["blocks"]:
-            kind = block[0]
-            if kind == "p":
-                story.append(Paragraph(rich(block[1]), S["body"]))
-            elif kind == "list":
-                for i, item in enumerate(block[1], start=1):
-                    prefix = f"{i}.&nbsp;&nbsp;" if block[2] else ""
-                    story.append(Paragraph(prefix + rich(item), S["item"]))
-                story.append(Spacer(1, 4))
-            elif kind == "fig":
-                figure(story, block[1])
-            elif kind == "table":
-                table(story, block[1])
 
 
 if __name__ == "__main__":

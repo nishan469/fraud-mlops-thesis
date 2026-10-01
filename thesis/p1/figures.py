@@ -5,6 +5,7 @@ import os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -168,8 +169,104 @@ def label_delay(path):
     plt.close(fig)
 
 
+def protocol(path):
+    """Evaluation protocol on one dataset: history, tuning stream, evaluated stream, weekly
+    steps, walk-forward folds, and what one step of the simulation does."""
+    fig, ax = plt.subplots(figsize=(10, 4.3))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 4.3)
+    ax.axis("off")
+    x0, x1, xt, xs = 0.3, 9.7, 3.6, 5.2      # start, end, tuning start, stream start
+    y = 3.0
+    ax.add_patch(plt.Rectangle((x0, y), xs - x0, 0.5, fc=FILL, ec=ACCENT, lw=1.2))
+    ax.add_patch(plt.Rectangle((xs, y), x1 - xs, 0.5, fc=FILL2, ec="#C8581E", lw=1.2))
+    ax.text((x0 + xs) / 2, y + 0.25, "history: initial training data", ha="center", va="center",
+            fontsize=9.5, color=INK)
+    ax.text((xs + x1) / 2, y + 0.25, "evaluated stream (replayed week by week)", ha="center",
+            va="center", fontsize=9.5, color=INK)
+    for x in np.arange(xs, x1 + 1e-9, 0.36):
+        ax.plot([x, x], [y - 0.08, y], color="#C8581E", lw=0.8)
+    ax.annotate("", xy=(xt, y + 0.78), xytext=(x1, y + 0.78),
+                arrowprops=dict(arrowstyle="<->", color=MUTED, lw=1.1))
+    ax.text((xt + x1) / 2, y + 0.9, "walk-forward tuning stream (all settings run)", ha="center",
+            fontsize=8.6, color=MUTED)
+    for x, lab in ((x0, "first\ntransaction"), (xs, "stream start t0\n(50-60% of rows)"),
+                   (x1, "last\ntransaction")):
+        ax.text(x, y - 0.2, lab, ha="center", va="top", fontsize=8.4, color=INK)
+    # walk-forward folds
+    fy = 2.0
+    fw = (x1 - xs) / 4
+    for i, x in enumerate(np.arange(xs, x1 - 1e-9, fw)):
+        w = fw
+        ax.add_patch(plt.Rectangle((x, fy), w - 0.05, 0.32, fc="#F6F5F1", ec="#8A96A8", lw=1))
+        ax.text(x + w / 2, fy + 0.16, f"fold {i + 1}" if i < 3 else "...", ha="center", va="center", fontsize=8,
+                color=MUTED)
+    ax.text(xs - 0.1, fy + 0.16, "4-week folds: settings chosen\nfrom matured labels only",
+            ha="right", va="center", fontsize=8.4, color=MUTED)
+    # one step
+    steps = [("1. Labels available", "transactions older than\nnow - label delay"),
+             ("2. Decide", "strategy rule: schedule,\nscore PSI or PR-AUC drop"),
+             ("3. Retrain (if decided)", "on all or the last W days\nof labelled data"),
+             ("4. Serve and score", "next 7 days; weekly\nPR-AUC recorded")]
+    for i, (t, b) in enumerate(steps):
+        bx = 0.3 + i * 2.4
+        ax.add_patch(FancyBboxPatch((bx, 0.12), 2.1, 1.25, boxstyle="round,pad=0.02,rounding_size=0.08",
+                                    fc=FILL, ec=ACCENT, lw=1.2))
+        ax.text(bx + 1.05, 1.22, t, ha="center", va="top", fontsize=9.3, fontweight="bold", color=INK)
+        ax.text(bx + 1.05, 0.88, b, ha="center", va="top", fontsize=8.3, color=MUTED, linespacing=1.3)
+        if i < 3:
+            arrow(ax, bx + 2.1, 0.75, bx + 2.4, 0.75)
+    ax.text(5.0, 1.52, "every 7 days of the stream, for each strategy and label delay:",
+            ha="center", fontsize=8.8, color=ACCENT, style="italic")
+    plt.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def architecture(path):
+    """Components of the framework and the data that flows between them."""
+    fig, ax = plt.subplots(figsize=(10, 5.0))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 5.0)
+    ax.axis("off")
+
+    def comp(x, y, w, h, title, body, edge=ACCENT, fill=FILL):
+        box(ax, x, y, w, h, title, body, fill=fill, edge=edge)
+
+    comp(0.1, 3.5, 1.9, 1.3, "Transactions", "incoming stream,\nscored at once", edge="#8A96A8",
+         fill="#F6F5F1")
+    comp(2.6, 3.5, 2.1, 1.3, "Scoring API", "FastAPI; champion\nmodel scores and\nflags", )
+    comp(5.4, 3.5, 2.0, 1.3, "Label store", "chargebacks arrive\nafter the label delay",
+         edge="#8A96A8", fill="#F6F5F1")
+    comp(8.0, 3.5, 1.9, 1.3, "Monitor", "live PR-AUC on\nmatured labels;\nPSI logged")
+    comp(8.0, 1.6, 1.9, 1.3, "Retrain policy", "schedule (14 d)\n+ safety net")
+    comp(5.4, 1.6, 2.0, 1.3, "Trainer", "LightGBM on the\ntraining window;\nchallenger")
+    comp(2.6, 1.6, 2.1, 1.3, "Promotion gate", "challenger vs\nchampion on\nunseen data", edge="#C8581E")
+    comp(0.1, 1.6, 1.9, 1.3, "MLflow registry", "versions; champion\nand previous\naliases")
+    comp(2.6, 0.05, 4.8, 1.05, "Monitoring dashboard", "performance, drift, decisions and versions,\nread from the MLflow logs of every step",
+         edge="#8A96A8", fill="#F6F5F1")
+    arrow(ax, 2.0, 4.15, 2.6, 4.15)
+    arrow(ax, 4.7, 4.15, 5.4, 4.15)
+    arrow(ax, 7.4, 4.15, 8.0, 4.15)
+    arrow(ax, 8.95, 3.5, 8.95, 2.9)
+    arrow(ax, 8.0, 2.25, 7.4, 2.25)
+    arrow(ax, 5.4, 2.25, 4.7, 2.25)
+    arrow(ax, 2.6, 2.25, 2.0, 2.25)
+    arrow(ax, 1.05, 2.9, 2.6, 3.75, rad=-0.2)
+    ax.text(1.0, 3.25, "promote:\nnew champion", ha="center", fontsize=8, color="#C8581E")
+    ax.annotate("", xy=(6.4, 2.9), xytext=(6.4, 3.5),
+                arrowprops=dict(arrowstyle="-|>", color=MUTED, lw=1.2))
+    ax.text(6.5, 3.2, "labelled data", ha="left", va="center", fontsize=7.8, color=MUTED)
+    plt.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
+
     os.makedirs(os.path.join(HERE, "figures"), exist_ok=True)
+    protocol(os.path.join(HERE, "figures", "protocol.png"))
+    architecture(os.path.join(HERE, "figures", "architecture.png"))
     methodology(os.path.join(HERE, "figures", "methodology.png"))
     framework_loop(os.path.join(HERE, "figures", "framework_loop.png"))
     drift_types(os.path.join(HERE, "figures", "drift_types.png"))

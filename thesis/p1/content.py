@@ -3,7 +3,7 @@
 
 Markup inside text: <b>..</b>, <i>..</i>, citations [@key] or [@key1,key2] (numbered in
 order of first appearance, IEEE style). Blocks: ("p", text), ("list", [items], numbered),
-("fig", key), ("table", key).
+("fig", key), ("table", key), ("eq", key) (equations: see chapter3.py).
 
 References are restricted to the 20 works in the team's reference list ("P1 & P2.docx").
 """
@@ -708,7 +708,17 @@ CH2 = {"title": "Literature Review", "sections": [
     ]},
 ]}
 
-CHAPTERS = [CH1, CH2]
+# ------------------------------------------------------------------------------ later chapters
+import os as _os
+
+import chapter3 as _ch3
+
+FIGURES.update(_ch3.FIGURES)
+TABLES.update(_ch3.TABLES)
+EQUATIONS = dict(_ch3.EQUATIONS)
+ALL_CHAPTERS = [CH1, CH2, _ch3.CH3]
+# The P1 has chapters 1-2; the builders set THESIS_CHAPTERS for the full draft (--chapters N)
+CHAPTERS = ALL_CHAPTERS[:int(_os.environ.get("THESIS_CHAPTERS", "2"))]
 
 # ------------------------------------------------------------------------------ references
 # Only the 20 works listed in "P1 & P2.docx".

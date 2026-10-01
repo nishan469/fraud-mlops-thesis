@@ -3,7 +3,7 @@
 Every `step_days`:
   1. monitor   - champion's live PR-AUC on matured labels, score/feature PSI
   2. decide    - scheduled retrain, or safety-net retrain on a sharp performance drop
-  3. retrain   - train a challenger on the sliding window of labelled data, register it
+  3. retrain   - train a challenger on the labelled window (sliding, or expanding), register it
   4. gate      - promote the challenger to `champion` only if it is not worse on unseen data
   5. serve     - score the next step's transactions with the champion
 Monitoring is logged to an MLflow run (one metric point per step); each training is its own

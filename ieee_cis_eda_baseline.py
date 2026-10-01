@@ -284,6 +284,8 @@ def main():
         print("\nLogged run to MLflow (view with: mlflow ui)")
     except ImportError:
         print("\nMLflow not installed, skipping experiment logging.")
+    except Exception as e:      # logging is optional; never lose the results over it
+        print(f"\nMLflow logging skipped ({type(e).__name__}: {e})")
 
     print(f"\nDone. All outputs are in {os.path.abspath(args.out_dir)}")
 

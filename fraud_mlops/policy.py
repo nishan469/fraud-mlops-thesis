@@ -38,6 +38,8 @@ class RetrainPolicy:
 
     def training_window(self, now):
         hi = now - self.cfg.label_delay_days
+        if self.cfg.train_window_days <= 0:      # expanding: all labelled history
+            return 0.0, hi
         return hi - self.cfg.train_window_days, hi
 
 

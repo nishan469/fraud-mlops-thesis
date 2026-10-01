@@ -34,7 +34,7 @@ early_stopping_rounds = 100
 label_delay_days = 30        # labels (chargebacks) become usable this long after the transaction
 step_days = 7                # how often the loop wakes up (monitor, decide, serve)
 retrain_every_days = 14      # primary policy: scheduled retraining
-train_window_days = 60       # sliding window of labelled data used for each training run
+train_window_days = 60       # sliding window of labelled data used for each training run (0 = expanding: all history)
 safety_net_tol = 0.30        # early retrain if live PR-AUC < (1 - tol) x reference, where
                              # reference = max(champion's val PR-AUC, median of recent live PR-AUC)
 history_window = 4           # recent live measurements (any champion) behind that median

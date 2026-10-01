@@ -226,7 +226,7 @@ footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; g
     `The ${M.model_name} model replayed over days ${Math.round(M.start_day)}–${Math.round(M.end_day)} of the data as if live. ` +
     `Fraud labels arrive ${M.label_delay} days after a transaction, so the loop only ever judges the model on labels that old.`;
   const chips = [
-    ["Policy", `retrain every ${M.retrain_every} d on the last ${M.window} d of labels`],
+    ["Policy", `retrain every ${M.retrain_every} d on ${M.window > 0 ? `the last ${M.window} d of labels` : 'all labelled history (expanding)'}`],
     ["Safety net", `live PR-AUC below ${Math.round((1 - M.safety_net_tol) * 100)}% of reference, or no skill`],
     ["Champion", "v" + M.final_champion],
     ["MLflow run", `<span class="mono">${esc((M.run_id || "").slice(0, 12))}</span>`],

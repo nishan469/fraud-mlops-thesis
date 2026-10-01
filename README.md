@@ -19,6 +19,7 @@ the `fraud_mlops` framework that implements that decision end to end.
 | `seed_robustness.py` | Key comparisons repeated over 5 training seeds |
 | `gate_fault_test.py` | Fault injection: does the promotion gate stop bad models? |
 | `prepare_sparkov.py`, `run_sparkov_replication.py` | Second dataset: data preparation and the full replication |
+| `prepare_baf.py`, `run_replication.py`, `kaggle_run.ipynb` | Third dataset (BAF); generic replication runner; Kaggle notebook |
 
 Put `train_transaction.csv` and `train_identity.csv` in `data/`. Install: `pip install -r requirements.txt`.
 
@@ -35,6 +36,21 @@ python run_sparkov_replication.py   # prepare -> baseline -> sweep -> walk-forwa
 features use only earlier transactions; data cut at 2020-12-21, where simulated fraud stops),
 so every script above runs on it with `--data_dir data/sparkov`, and the framework with
 `--config configs/sparkov.toml`. Results go to `outputs/sparkov/`.
+
+### Third dataset: Bank Account Fraud (BAF, NeurIPS 2022), on Kaggle
+
+[BAF dataset suite](https://www.kaggle.com/datasets/sgpjesus/bank-account-fraud-dataset-neurips-2022):
+1M bank-account applications over 8 months, ~1.1% fraud. `prepare_baf.py` converts `Base.csv`
+(BAF records only the month, so each row gets a time inside its month; drift is between months).
+
+```bash
+python run_replication.py --dataset baf --in_dir path/to/baf   # all steps, outputs/baf/
+```
+
+`kaggle_run.ipynb` runs the same on Kaggle: attach the BAF dataset, then *Save & Run All*.
+It can be split into two parts to stay within Kaggle's 12-hour limit (see the notebook).
+`run_replication.py --dataset sparkov` runs the Sparkov replication the same way, including
+the expanding-window replay (`configs/sparkov_expanding.toml`).
 
 ## What the experiments found (and why the framework looks like it does)
 

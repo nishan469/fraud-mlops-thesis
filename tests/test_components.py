@@ -87,3 +87,12 @@ def test_monitor_uses_only_unseen_matured_labels(store, cfg):
     assert rep.matured_from >= 50 and rep.matured_until == 70
     assert rep.matured_rows > 0 and not np.isnan(rep.live_pr_auc)
     assert not np.isnan(rep.score_psi) and len(rep.feature_psi) > 0
+
+
+def test_expanding_window_starts_at_beginning():
+    from fraud_mlops.config import PolicyConfig
+    from fraud_mlops.policy import RetrainPolicy
+    pol = RetrainPolicy(PolicyConfig(label_delay_days=30, train_window_days=0))
+    assert pol.training_window(100) == (0.0, 70)
+    pol = RetrainPolicy(PolicyConfig(label_delay_days=30, train_window_days=60))
+    assert pol.training_window(100) == (10, 70)

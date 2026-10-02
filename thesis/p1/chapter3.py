@@ -1,4 +1,4 @@
-"""Chapter 3 (Methodology): text, figures, tables and equations. Merged into content.py.
+"""Methodology and Design (Chapter 3 of the draft, Chapter 4 of the P2): text, figures, tables and equations. Merged into content.py.
 
 Same markup as content.py. Equations: ("eq", key) blocks, defined in EQUATIONS as
 (latex, pdf_html), numbered per chapter and referenced as [@eq:key]. Every number here is
@@ -8,13 +8,17 @@ retraining_simulation.py, walkforward_tuning.py, seed_robustness.py, gate_fault_
 
 SYM = '<font name="Symbol">{}</font>'          # Greek letters in the PDF (Symbol font)
 SUM, TAU, DELTA, LAMBDA, PI, KAPPA = (SYM.format(c) for c in "Στδλπκ")
-GE, LE, MINUS = (SYM.format(c) for c in "≥≤−")
+GE, LE, MINUS, IN = (SYM.format(c) for c in "≥≤−∈")
 
 FIGURES = {
     "protocol": ("figures/protocol.png",
                  "Evaluation protocol: each dataset is split in time into a history and a "
                  "stream that is replayed week by week; settings are tuned walk-forward in "
                  "4-week folds"),
+    "modelarch": ("figures/model_architecture.png",
+                  "Architecture of the fraud detection model: a transaction's features pass "
+                  "through a sequence of boosted decision trees, whose summed output becomes a "
+                  "fraud probability and, with the validation threshold, a decision"),
     "architecture": ("figures/architecture.png",
                      "Components of the proposed framework and the flow of data between them"),
 }
@@ -45,6 +49,10 @@ EQUATIONS = {
                f"AP<sub>live</sub> &lt; (1 - {TAU}) max(AP<sub>val</sub>, median<sub>4</sub>"
                f"(AP<sub>live</sub>))&nbsp;&nbsp; or &nbsp;&nbsp;AP<sub>live</sub> &lt; "
                f"{LAMBDA} {PI}"),
+    "select": (r"w^{*} = \arg\max_{w \in \mathcal{W}} \mathrm{AP}_{E}(m_w), "
+               r"\qquad \mathcal{W} = \{\text{60 days},\ \text{all history}\}",
+               f"<i>w</i>* = argmax<sub><i>w</i> {IN} <i>W</i></sub> AP<sub><i>E</i></sub>"
+               f"(<i>m<sub>w</sub></i>),&nbsp;&nbsp;&nbsp; <i>W</i> = {{60 days, all history}}"),
     "gate": (r"\mathrm{AP}(\text{challenger}) \ge \mathrm{AP}(\text{champion}) - \delta",
              f"AP(challenger) {GE} AP(champion) {MINUS} {DELTA}"),
 }
@@ -130,6 +138,8 @@ TABLES = {
             ["Label delay d", "30 days", "Labels usable this long after the transaction"],
             ["Retraining schedule", "14 days", "Primary policy"],
             ["Training window", "60 days", "Sliding window of labelled data (0 = expanding)"],
+            ["Candidate windows", "60 days, all", "With automatic selection: one challenger per "
+             "window, the best one is gated"],
             ["Monitoring window", "14 days", "Matured labels used for live PR-AUC"],
             ["Minimum frauds", "30", "Fewer frauds: live PR-AUC is not computed"],
             ["Safety-net tolerance " + TAU, "0.30", "Relative drop that triggers an early retrain"],
@@ -159,8 +169,14 @@ TABLES = {
     },
 }
 
-CH3 = {"title": "Methodology", "sections": [
-    {"title": "Research Design", "blocks": [
+CH3_SECTIONS = [
+    {"title": "Design Process or Methodology Overview", "key": "overview", "blocks": [
+        ("p", "This section describes how the study was designed and carried out: the overall "
+              "research design, the data, the way a deployment is simulated, the retraining "
+              "strategies that are compared, and how the results and the framework are "
+              "evaluated. The specification of the model and of the framework itself follows "
+              "in Section [@sec:spec]."),
+        ("sub", "Research Design", "design"),
         ("p", "This study is an empirical, simulation-based investigation followed by the design "
               "and evaluation of a software framework. Chapter 2 showed that the claims made for "
               "drift-triggered retraining rest mostly on artificial drift, single datasets and "
@@ -178,14 +194,14 @@ CH3 = {"title": "Methodology", "sections": [
               "comparison is reported with a confidence interval, the settings of competing "
               "strategies are tuned with the same procedure, and the key results are repeated "
               "with several training seeds and on a second dataset."),
-        ("p", "The rest of this chapter describes the datasets and their preparation "
-              "(Section 3.2), the model (Section 3.3), the simulated deployment and the "
-              "retraining strategies (Sections 3.4 and 3.5), the drift and performance measures "
-              "(Section 3.6), the statistical validation (Section 3.7), the framework "
-              "(Section 3.8), the fault-injection tests (Section 3.9) and the implementation "
-              "(Section 3.10)."),
-    ]},
-    {"title": "Datasets and Preparation", "blocks": [
+        ("p", "The rest of this section describes the datasets and their preparation "
+              "(Section [@sec:data]), the simulated deployment under label delay (Section "
+              "[@sec:deploy]), the retraining strategies (Section [@sec:strategies]), the drift and "
+              "performance measures (Section [@sec:measures]), the statistical validation "
+              "(Section [@sec:validation]) and the evaluation of the framework, including "
+              "fault injection (Section [@sec:faults]). Section [@sec:spec] then specifies the "
+              "design: the fraud detection model and each component of the framework."),
+        ("sub", "Datasets and Preparation", "data"),
         ("p", "Public fraud datasets with reliable timestamps are scarce. Many studies use the "
               "European credit-card dataset, which covers only two days and therefore cannot "
               "show drift [@dang2021,@mienye2023]. We use three datasets that cover months to "
@@ -235,41 +251,16 @@ CH3 = {"title": "Methodology", "sections": [
               "and at 50% for Sparkov and BAF, whose longer histories allow a full year or four "
               "months of training data before deployment."),
         ("fig", "protocol"),
-    ]},
-    {"title": "Model", "blocks": [
-        ("p", "All experiments use LightGBM, a gradient boosted decision tree library, with the "
-              "settings in Table [@tab:hyper]. Gradient boosted trees are strong and widely "
-              "used models for tabular fraud data [@uddin2026,@amekoe2024], they handle missing "
-              "values and categorical features natively, and they train fast enough to be "
-              "retrained hundreds of times. Amekoe et al. also found that batch-trained boosted "
-              "trees remain competitive with incremental learners when labels arrive late "
-              "[@amekoe2024], which is exactly the setting of this study. The goal is not to "
-              "find the best possible classifier, as many static studies do "
-              "[@mienye2023,@abdelnaby2023,@sohony2018], but to keep one strong and realistic "
-              "model fixed so that differences between retraining strategies can be attributed "
-              "to the strategies alone. No resampling such as SMOTE is used, because it can "
-              "distort the evaluation [@dang2021]; class imbalance is handled by weighting the "
-              "fraud class instead."),
-        ("table", "hyper"),
-        ("p", "Every training run uses a time-ordered validation split: the most recent 15% of "
-              "the training window is held out for early stopping, for choosing the decision "
-              "threshold, and for recording the model's reference PR-AUC. The decision "
-              "threshold is the one that maximises the F1-score on this validation part. It is "
-              "used for the F1-score, precision and recall reported alongside PR-AUC and for "
-              "the fraud flags returned by the scoring service; PR-AUC itself does not depend "
-              "on a threshold."),
-        ("p", "For the static baseline in RQ1, the first 50% of each dataset is used for "
-              "training, the next 10% for validation, and the remaining 40% is divided into ten "
-              "consecutive time bins, so that performance can be followed over the months after "
-              "deployment."),
-    ]},
-    {"title": "Simulated Deployment under Label Delay", "blocks": [
+        ("sub", "Simulated Deployment under Label Delay", "deploy"),
         ("p", "The stream is replayed in steps of seven days, from the stream start to the end "
               "of the data. At each step, three things happen in order: the strategy checks "
               "which labels are available and decides whether to retrain; if it retrains, a new "
               "model is trained and immediately replaces the old one; and the current model "
               "scores the transactions of the next seven days. The scores of each week are kept, "
-              "together with the version of the model that produced them."),
+              "together with the version of the model that produced them. In production the "
+              "transactions would arrive through a streaming platform such as Kafka or Flink, "
+              "as in the real-time pipelines of Kaushik et al. [@kaushik2025]; replaying "
+              "recorded data instead makes every experiment exactly repeatable."),
         ("p", "Label delay is modelled as a fixed number of days <i>d</i> between a transaction "
               "and the moment its label can be used. At time <i>t</i>, the labelled data "
               "available for monitoring and training is"),
@@ -284,8 +275,7 @@ CH3 = {"title": "Methodology", "sections": [
               "arrives faster in a real system [@dalpozzolo2018], is not modelled: every label "
               "arrives after the same delay. This makes the setting slightly pessimistic for "
               "performance-based triggers, a point we return to in the discussion."),
-    ]},
-    {"title": "Retraining Strategies", "blocks": [
+        ("sub", "Retraining Strategies", "strategies"),
         ("p", "Five strategies are compared, covering the options described in Section 2.1 "
               "[@pulicharla2019,@dalpozzolo2018]. They are summarised in Table "
               "[@tab:strategies]."),
@@ -298,7 +288,7 @@ CH3 = {"title": "Methodology", "sections": [
         ("p", "The <b>score-PSI</b> strategy is a typical label-free drift trigger "
               "[@shakil2025,@wong2025]. It compares the distribution of the scores the model "
               "produced over the last week with the scores it produced on its own validation "
-              "data, using the PSI defined in Section 3.6, and retrains when the PSI exceeds "
+              "data, using the PSI defined in Section [@sec:measures], and retrains when the PSI exceeds "
               "0.1, the usual boundary between a stable and a shifted population. It can react "
               "immediately because it needs no labels."),
         ("p", "The <b>performance</b> strategy is an error-based trigger in the spirit of DDM "
@@ -317,8 +307,7 @@ CH3 = {"title": "Methodology", "sections": [
               "retraining decision and the training window. Models trained on identical "
               "windows are cached and reused across strategies, which makes the large number "
               "of runs feasible and guarantees that identical decisions give identical models."),
-    ]},
-    {"title": "Drift and Performance Measures", "blocks": [
+        ("sub", "Drift and Performance Measures", "measures"),
         ("p", "<b>Population Stability Index.</b> Drift in a feature or in the model's scores "
               "is measured with the PSI, which compares a current distribution with a "
               "reference distribution [@wong2025]:"),
@@ -350,8 +339,7 @@ CH3 = {"title": "Methodology", "sections": [
         ("p", "Weeks without any fraud are skipped. The lowest weekly PR-AUC, the number of "
               "retrains and the F1-score at each model's own threshold are reported as "
               "secondary measures."),
-    ]},
-    {"title": "Statistical Validation", "blocks": [
+        ("sub", "Statistical Validation", "validation"),
         ("p", "<b>Paired day-block bootstrap.</b> Weekly PR-AUC is noisy, especially when a week "
               "contains only a few hundred frauds, and consecutive transactions are correlated. "
               "Confidence intervals are therefore computed with a bootstrap that resamples "
@@ -387,70 +375,17 @@ CH3 = {"title": "Methodology", "sections": [
               "the delay sweep, walk-forward tuning, seeds and the framework replay, is repeated "
               "unchanged on Sparkov and BAF, with the same scripts and settings. A finding that "
               "holds on IEEE-CIS but not on the other datasets is reported as dataset-specific."),
-    ]},
-    {"title": "Proposed Framework", "blocks": [
-        ("p", "The framework turns the experimental findings into a working MLOps system. Its "
-              "components are shown in Figure [@fig:architecture] and its settings in Table "
-              "[@tab:framework]. It runs the loop of Figure [@fig:loop] every seven days: "
-              "monitor, decide, retrain, check, and serve."),
-        ("fig", "architecture"),
-        ("p", "<b>Monitoring on delayed labels.</b> The monitor measures the live model's "
-              "PR-AUC on the labels that matured during the last 14 days, restricted to "
-              "transactions the model was not trained on. It also computes the PSI of the "
-              "model's scores and of its ten most important numeric features against a sample "
-              "of 50,000 rows of its training window, and logs both to MLflow. In line with the "
-              "experimental results, the PSI is logged for diagnosis only and never triggers "
-              "retraining on its own."),
-        ("p", "<b>Retraining policy.</b> The primary policy is a fixed schedule: a new model is "
-              "trained every 14 days on the last 60 days of labelled data. The schedule is "
-              "complemented by a <i>safety net</i> that retrains early, at most once every seven "
-              "days, when performance collapses between scheduled retrains:"),
-        ("eq", "safety"),
-        ("p", "with " + TAU + " = 0.30, " + LAMBDA + " = 3 and " + PI + " the fraud rate among "
-              "the matured labels. The first condition compares live PR-AUC with the better of "
-              "the model's own validation PR-AUC and the median of the last four live "
-              "measurements. Using recent live history as well as the validation score matters: "
-              "a model trained on corrupted data can report a poor validation score, which "
-              "would otherwise lower the bar it is measured against. The second condition is a "
-              "no-skill check, since a model without skill has a PR-AUC close to the fraud "
-              "rate."),
-        ("p", "<b>Training.</b> The trainer fits a LightGBM model with the settings of Table "
-              "[@tab:hyper] on the policy's training window, which ends one label delay before "
-              "the present. The window length can be set to zero for an expanding window. Each "
-              "new model is registered in MLflow as a <i>challenger</i>, together with its "
-              "training window, validation PR-AUC and threshold."),
-        ("p", "<b>Promotion gate.</b> A challenger replaces the live model (the <i>champion</i>) "
-              "only if it passes the promotion gate, following the champion-challenger pattern "
-              "of MLOps practice [@pulicharla2019,@kodakandla2024]. The gate compares both "
-              "models on the challenger's validation data, restricted to transactions that the "
-              "champion was not trained on, so that neither model is judged on data it has "
-              "seen. The challenger is promoted if"),
-        ("eq", "gate"),
-        ("p", "with " + DELTA + " = 0.01. Both models are re-scored through the production "
-              "feature path rather than with scores stored at training time. This detail is "
-              "essential: a model trained on wrongly scaled features looks good on its own, "
-              "equally wrong, validation data, but fails on the inputs it will actually "
-              "receive in production. If the comparison data contains fewer than 30 frauds, "
-              "the comparison is not reliable and the challenger is promoted by default."),
-        ("table", "framework"),
-        ("p", "<b>Registry, serving and dashboard.</b> MLflow stores every model version with its "
-              "parameters, metrics and training window. The model in service carries the alias "
-              "<i>champion</i> and its predecessor the alias <i>previous</i>, so a rollback is a "
-              "single alias change. A FastAPI service loads the champion and offers three "
-              "endpoints: <i>/health</i> reports the version being served, <i>/predict</i> "
-              "returns a fraud probability and flag for each submitted transaction, and "
-              "<i>/reload</i> switches to a newly promoted champion without restarting. A "
-              "monitoring dashboard, generated from the MLflow logs, shows weekly performance, "
-              "drift, every retraining decision with its reason, and the history of model "
-              "versions."),
-        ("p", "<b>Replay.</b> The framework is evaluated by running it over the evaluated stream "
+        ("sub", "Framework Evaluation and Fault Injection", "faults"),
+        ("p", "The framework is evaluated by running it over the evaluated stream "
               "of each dataset as if it were live, with a label delay of 30 days. The replay "
               "uses the same data store, MLflow registry and model code as a deployment would. "
               "Its mean weekly PR-AUC is compared with the offline simulation of the same "
               "policy, which checks that the framework reproduces the experimental results, "
-              "and with the static model."),
-    ]},
-    {"title": "Fault-Injection Testing", "blocks": [
+              "and with the static model. To evaluate window selection, four versions of the "
+              "framework are replayed on each dataset on the same machine: a static model, a "
+              "60-day window, all history, and automatic selection. The four replays share one "
+              "cache of trained models, so a model with the same training data is trained only "
+              "once and the versions differ only in their decisions."),
         ("p", "A retraining pipeline that runs automatically will eventually train on bad data. "
               "To test whether the framework's safeguards stop such models, we inject the "
               "faults in Table [@tab:faults] into selected retraining jobs of the replay "
@@ -468,21 +403,175 @@ CH3 = {"title": "Methodology", "sections": [
               "run, while the run without the safeguard loses performance. Each scenario uses "
               "its own MLflow store, so the main registry is never affected."),
     ]},
-    {"title": "Implementation and Reproducibility", "blocks": [
+    {"title": "Preliminary Design or Design (Model) Specification", "key": "spec", "blocks": [
+        ("p", "This section specifies the design: the fraud detection model used throughout the "
+              "study, and the drift-aware continuous learning framework built on the results of "
+              "the experiments, component by component, with its configuration and "
+              "implementation."),
+        ("sub", "Fraud Detection Model", "model"),
+        ("p", "All experiments use LightGBM, a gradient boosted decision tree library, with the "
+              "settings in Table [@tab:hyper]. Gradient boosted trees are strong and widely "
+              "used models for tabular fraud data [@uddin2026,@amekoe2024], they handle missing "
+              "values and categorical features natively, and they train fast enough to be "
+              "retrained hundreds of times. Amekoe et al. also found that batch-trained boosted "
+              "trees remain competitive with incremental learners when labels arrive late "
+              "[@amekoe2024], which is exactly the setting of this study. The goal is not to "
+              "find the best possible classifier, as many static studies do "
+              "[@mienye2023,@abdelnaby2023,@sohony2018], but to keep one strong and realistic "
+              "model fixed so that differences between retraining strategies can be attributed "
+              "to the strategies alone. No resampling such as SMOTE is used, because it can "
+              "distort the evaluation [@dang2021]; class imbalance is handled by weighting the "
+              "fraud class instead, a cost-sensitive approach that Somasundaram and Reddy "
+              "also used to handle imbalance in a drifting fraud stream [@somasundaram2019]."),
+        ("p", "Figure [@fig:modelarch] shows the architecture of the model. Each transaction is "
+              "described by its features, 431 on IEEE-CIS, 16 on Sparkov and 29 on BAF. "
+              "LightGBM builds an ensemble of decision trees one after another, each with up to "
+              "256 leaves, and every new tree is fitted to the errors that the trees before it "
+              "still make. Training stops when the validation AUC has not improved for 100 "
+              "rounds, at most after 2,000 trees. For a new transaction, the outputs of all "
+              "trees are summed into a score <i>F</i>(<i>x</i>), which a sigmoid function turns "
+              "into a fraud probability between 0 and 1; the transaction is flagged as fraud "
+              "when this probability reaches the decision threshold described below."),
+        ("fig", "modelarch"),
+        ("table", "hyper"),
+        ("p", "Every training run uses a time-ordered validation split: the most recent 15% of "
+              "the training window is held out for early stopping, for choosing the decision "
+              "threshold, and for recording the model's reference PR-AUC. The decision "
+              "threshold is the one that maximises the F1-score on this validation part. It is "
+              "used for the F1-score, precision and recall reported alongside PR-AUC and for "
+              "the fraud flags returned by the scoring service; PR-AUC itself does not depend "
+              "on a threshold. Alessi and Fugini manage the threshold dynamically during "
+              "operation to balance precision and recall [@alessi2026]; in this design each "
+              "model keeps the threshold chosen at training time, and a new threshold arrives "
+              "with every retrained model."),
+        ("p", "For the static baseline in RQ1, the first 50% of each dataset is used for "
+              "training, the next 10% for validation, and the remaining 40% is divided into ten "
+              "consecutive time bins, so that performance can be followed over the months after "
+              "deployment."),
+        ("sub", "Framework Architecture", "arch"),
+        ("p", "The framework turns the experimental findings into a working MLOps system. Its "
+              "components are shown in Figure [@fig:architecture] and its settings in Table "
+              "[@tab:framework]. It runs the loop of Figure [@fig:loop] every seven days: "
+              "monitor, decide, retrain, check, and serve. Like the closed-loop MLOps framework "
+              "of Reda et al. for phishing detection [@reda2025], it connects monitoring, "
+              "retraining and deployment in one automated loop; unlike it, its decisions are "
+              "designed for weeks of label delay rather than near-immediate feedback, so "
+              "retraining follows a schedule instead of being driven by drift events."),
+        ("fig", "architecture"),
+        ("sub", "Monitoring on Delayed Labels", "monitor"),
+        ("p", "The monitor measures the live model's "
+              "PR-AUC on the labels that matured during the last 14 days, restricted to "
+              "transactions the model was not trained on. It also computes the PSI of the "
+              "model's scores and of its ten most important numeric features against a sample "
+              "of 50,000 rows of its training window, and logs both to MLflow. In line with the "
+              "experimental results, the PSI is logged for diagnosis only and never triggers "
+              "retraining on its own. Two forms of monitoring are deliberately left outside the "
+              "current design: tracking drift separately for each source of data, as "
+              "DriftGuard-TriAudit does for the numbers, text and layout of financial statements "
+              "[@hassan2026], and tracking the stability of model explanations, which John "
+              "showed can become unstable and unfair as populations drift [@john2025]. Both are "
+              "natural extensions once the framework is used with several data sources or with "
+              "explanations shown to investigators."),
+        ("sub", "Retraining Policy and Safety Net", "safety"),
+        ("p", "The primary policy is a fixed schedule: a new model is "
+              "trained every 14 days on the last 60 days of labelled data. The schedule is "
+              "complemented by a <i>safety net</i> that retrains early, at most once every seven "
+              "days, when performance collapses between scheduled retrains:"),
+        ("eq", "safety"),
+        ("p", "with " + TAU + " = 0.30, " + LAMBDA + " = 3 and " + PI + " the fraud rate among "
+              "the matured labels. The first condition compares live PR-AUC with the better of "
+              "the model's own validation PR-AUC and the median of the last four live "
+              "measurements. Using recent live history as well as the validation score matters: "
+              "a model trained on corrupted data can report a poor validation score, which "
+              "would otherwise lower the bar it is measured against. The second condition is a "
+              "no-skill check, since a model without skill has a PR-AUC close to the fraud "
+              "rate."),
+        ("sub", "Training and Automatic Window Selection", "window"),
+        ("p", "The trainer fits a LightGBM model with the settings of Table "
+              "[@tab:hyper] on the policy's training window, which ends one label delay before "
+              "the present. The window length can be set to zero for an expanding window. Each "
+              "new model is registered in MLflow as a <i>challenger</i>, together with its "
+              "training window, validation PR-AUC and threshold."),
+        ("p", "<b>Automatic window selection.</b> The experiments showed that the best training "
+              "window depends on the dataset: the last 60 days on IEEE-CIS, but all labelled "
+              "history on Sparkov and BAF. A fixed window chosen on one dataset "
+              "can be wrong for another. The framework can therefore select the window itself. "
+              "At every retrain it trains one challenger <i>m<sub>w</sub></i> per candidate "
+              "window <i>w</i>, here the last 60 days and all labelled history, and scores all "
+              "of them on the same evaluation rows <i>E</i>: the most recent labelled "
+              "transactions that none of the candidates was trained on and the champion was not "
+              "trained on either. It keeps"),
+        ("eq", "select"),
+        ("p", "and only this challenger goes on to the promotion gate; the others are registered "
+              "as not selected. The choice uses only data that would be available at the time, "
+              "so it needs no knowledge of which window suits the dataset. Because the "
+              "candidates are trained on identical data except for their start date, the extra "
+              "cost is one additional training run per retrain."),
+        ("sub", "Promotion Gate", "gate"),
+        ("p", "A challenger replaces the live model (the <i>champion</i>) "
+              "only if it passes the promotion gate, following the champion-challenger pattern "
+              "of MLOps practice [@pulicharla2019,@kodakandla2024]. The gate compares both "
+              "models on the challenger's validation data, restricted to transactions that the "
+              "champion was not trained on, so that neither model is judged on data it has "
+              "seen. The challenger is promoted if"),
+        ("eq", "gate"),
+        ("p", "with " + DELTA + " = 0.01. Both models are re-scored through the production "
+              "feature path rather than with scores stored at training time. This detail is "
+              "essential: a model trained on wrongly scaled features looks good on its own, "
+              "equally wrong, validation data, but fails on the inputs it will actually "
+              "receive in production. If the comparison data contains fewer than 30 frauds, "
+              "the comparison is not reliable and the challenger is promoted by default."),
+        ("sub", "Model Registry, Serving and Dashboard", "serving"),
+        ("p", "MLflow stores every model version with its "
+              "parameters, metrics and training window. The model in service carries the alias "
+              "<i>champion</i> and its predecessor the alias <i>previous</i>, so a rollback is a "
+              "single alias change. A FastAPI service loads the champion and offers three "
+              "endpoints: <i>/health</i> reports the version being served, <i>/predict</i> "
+              "returns a fraud probability and flag for each submitted transaction, and "
+              "<i>/reload</i> switches to a newly promoted champion without restarting. A "
+              "monitoring dashboard, generated from the MLflow logs, shows weekly performance, "
+              "drift, every retraining decision with its reason, and the history of model "
+              "versions."),
+        ("sub", "Framework Configuration", "config"),
+        ("table", "framework"),
+        ("sub", "Implementation and Reproducibility", "impl"),
         ("p", "The study is implemented in Python with LightGBM, pandas, NumPy and "
               "scikit-learn for the experiments, MLflow with an SQLite backend for tracking "
               "and the model registry, and FastAPI for the scoring service. The framework is "
               "organised as a Python package with separate modules for configuration, data "
               "access, training, monitoring, the retraining policy, the promotion gate, the "
               "registry, fault injection, serving and the dashboard, and is configured with "
-              "one TOML file per dataset. Twenty-one automated tests on small synthetic data "
+              "one TOML file per dataset. Twenty-four automated tests on small synthetic data "
               "check the components and the full loop."),
         ("p", "The long experiments, which take several hours each, save their results after "
               "every completed label delay or seed and can resume after an interruption such as "
               "a power cut. One runner script reproduces the whole replication on any of the "
-              "datasets, and a Kaggle notebook runs it on Kaggle's CPU servers. The experiments "
+              "datasets, and Kaggle notebooks run it, and the window-selection comparison, on "
+              "Kaggle's CPU servers. The experiments "
               "were run on a desktop computer and on Kaggle notebooks with four CPU cores. All "
               "code, configurations and instructions are kept in a public Git repository, so "
               "that every number in this thesis can be regenerated from the public datasets."),
     ]},
-]}
+]
+
+
+def build(standalone=False):
+    """The chapter. `standalone` (the P2, which has no Chapter 1) also shows the workflow and
+    loop figures here, since Figures 1.1 and 1.2 are not part of that document."""
+    import copy
+    sections = copy.deepcopy(CH3_SECTIONS)
+    if standalone:
+        for sec in sections:
+            blocks = sec["blocks"]
+            for i, b in enumerate(blocks):
+                if b[0] == "p" and "[@fig:method]" in b[1]:
+                    blocks.insert(i + 1, ("fig", "method"))
+                    break
+            for i, b in enumerate(blocks):
+                if b[0] == "fig" and b[1] == "architecture":
+                    blocks.insert(i + 1, ("fig", "loop"))
+                    break
+    return {"title": "Methodology and Design", "sections": sections}
+
+
+CH3 = build()

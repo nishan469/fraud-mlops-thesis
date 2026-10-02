@@ -712,13 +712,33 @@ CH2 = {"title": "Literature Review", "sections": [
 import os as _os
 
 import chapter3 as _ch3
+import chapter4 as _ch4
 
-FIGURES.update(_ch3.FIGURES)
-TABLES.update(_ch3.TABLES)
+for _m in (_ch3, _ch4):
+    FIGURES.update(_m.FIGURES)
+    TABLES.update(_m.TABLES)
 EQUATIONS = dict(_ch3.EQUATIONS)
-ALL_CHAPTERS = [CH1, CH2, _ch3.CH3]
-# The P1 has chapters 1-2; the builders set THESIS_CHAPTERS for the full draft (--chapters N)
-CHAPTERS = ALL_CHAPTERS[:int(_os.environ.get("THESIS_CHAPTERS", "2"))]
+ALL_CHAPTERS = [CH1, CH2, _ch3.CH3, _ch4.CH4]
+# Builders set THESIS_MODE: "p1" (chapters 1-2), "draft" (the first THESIS_CHAPTERS chapters)
+# "p2" (only the methodology and design chapter, numbered 4) or "report" (the full report in
+# the BRAC template structure, report.py); every mode cites all references
+MODE = _os.environ.get("THESIS_MODE", "p1")
+FIRST_CHAPTER, REQUIRE_ALL_CITED = 1, True
+if MODE == "p2":
+    CHAPTERS, FIRST_CHAPTER, REQUIRE_ALL_CITED = [_ch3.build(standalone=True)], 4, True
+elif MODE in ("report", "report_empty"):
+    import report as _report
+    FIGURES.update(_report.FIGURES)
+    TABLES.update(_report.TABLES)
+    ABSTRACT, KEYWORDS = _report.ABSTRACT, _report.KEYWORDS
+    if MODE == "report":
+        CHAPTERS = _report.chapters(CH1, CH2)
+    else:      # Chapters 1-3 empty: only the references cited in Chapters 4-6 are listed
+        CHAPTERS, REQUIRE_ALL_CITED = _report.chapters_empty123(CH1, CH2), False
+elif MODE == "draft":
+    CHAPTERS = ALL_CHAPTERS[:int(_os.environ.get("THESIS_CHAPTERS", "4"))]
+else:
+    CHAPTERS = [CH1, CH2]
 
 # ------------------------------------------------------------------------------ references
 # Only the 20 works listed in "P1 & P2.docx".

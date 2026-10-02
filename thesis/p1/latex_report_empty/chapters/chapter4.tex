@@ -1,57 +1,30 @@
 \chapter{Methodology and Design}
 
-\section{Design Process or Methodology Overview}\label{sec:overview}
+\section{Design Process}\label{sec:overview}
 
-This section describes how the study was designed and carried out: the overall research design, the data, the way a deployment is simulated, the retraining strategies that are compared, and how the results and the framework are evaluated. The specification of the model and of the framework itself follows in Section \ref{sec:spec}.
+The study follows the design process shown in Figure \ref{fig:method3}: experiments that measure how a deployed fraud model behaves under drift and label delay, a framework designed around their results, and an evaluation of that framework on three datasets.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/methodology_3ds.png}
+  \caption{Methodology overview: the experiments on three datasets, the framework and its evaluation}
+  \label{fig:method3}
+\end{figure}
 
 \subsection{Research Design}\label{sec:design}
 
 This study is an empirical, simulation-based investigation followed by the design and evaluation of a software framework. Chapter 2 showed that the claims made for drift-triggered retraining rest mostly on artificial drift, single datasets and labels that arrive immediately \cite{shakil2025,wong2025,yelleti2025}. We therefore first measure, on public fraud data with natural drift, how a deployed model behaves and which retraining policy works best under label delay (research questions RQ1 to RQ3), and only then design the framework around the result and test it (RQ4). The study follows the workflow in Figure \ref{fig:method}.
 
-Three principles guide every experiment. First, \textbf{time is respected}: a model is only trained on transactions that happened, and whose labels were available, before the period it is evaluated on \cite{menezes2025}. Second, \textbf{the deployment is simulated, not imagined}: each dataset is replayed as a stream, week by week, and the label delay is applied explicitly, as described by Dal Pozzolo et al. \cite{dalpozzolo2018}. Third, \textbf{differences must survive uncertainty}: every comparison is reported with a confidence interval, the settings of competing strategies are tuned with the same procedure, and the key results are repeated with several training seeds and on a second dataset.
-
-The rest of this section describes the datasets and their preparation (Section \ref{sec:data}), the simulated deployment under label delay (Section \ref{sec:deploy}), the retraining strategies (Section \ref{sec:strategies}), the drift and performance measures (Section \ref{sec:measures}), the statistical validation (Section \ref{sec:validation}) and the evaluation of the framework, including fault injection (Section \ref{sec:faults}). Section \ref{sec:spec} then specifies the design: the fraud detection model and each component of the framework.
-
-\subsection{Datasets and Preparation}\label{sec:data}
-
-Public fraud datasets with reliable timestamps are scarce. Many studies use the European credit-card dataset, which covers only two days and therefore cannot show drift \cite{dang2021,mienye2023}. We use three datasets that cover months to years, summarised in Table \ref{tab:datasets}.
-
-{\footnotesize
-\begin{longtable}{>{\raggedright\arraybackslash}p{0.16\textwidth}>{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.25\textwidth}}
-\caption{Datasets used in this study (after preparation)}\label{tab:datasets}\\
-\toprule
-\textbf{} & \textbf{IEEE-CIS} & \textbf{Sparkov} & \textbf{BAF (Base)} \\
-\midrule
-\endfirsthead
-\toprule
-\textbf{} & \textbf{IEEE-CIS} & \textbf{Sparkov} & \textbf{BAF (Base)} \\
-\midrule
-\endhead
-Domain & Real e-commerce card transactions (Vesta) & Simulated card transactions (Sparkov generator) & Bank account opening applications (privacy-preserving synthetic data) \\ \midrule
-Records & 590,540 & 1,801,969 & 1,000,000 \\ \midrule
-Time span & 182 days & 720 days (to 21 Dec 2020) & 8 months \\ \midrule
-Fraud rate & 3.50\% & 0.53\% & 1.10\% \\ \midrule
-Features used & 431 (transaction and identity tables, mostly anonymised) & 16 (amount, time, location, customer and card-history features) & 29 (applicant, request, device and velocity features) \\ \midrule
-Time resolution & Seconds from a reference point & Exact timestamp & Month only (time within the month assigned at random) \\ \midrule
-Stream starts at & 60\% of rows (day 101) & 50\% of rows (about 1 Jan 2020) & 50\% of rows (month 4) \\ \midrule
-Role & Main dataset & Replication & Second replication \\ \bottomrule
-\end{longtable}
-}
-
-\textbf{IEEE-CIS Fraud Detection} is the main dataset. It was released by the IEEE Computational Intelligence Society and Vesta Corporation and contains 590,540 real e-commerce transactions over 182 days, of which 3.5\% are fraudulent. It has been used in recent studies of drift and fraud detection \cite{menezes2025,uddin2026}. The transaction and identity tables are joined on the transaction identifier, giving 431 features, most of them anonymised by the provider. Only the time column (seconds from a reference point), the identifier and the label are excluded. Text columns are treated as categorical features, which LightGBM handles natively, and missing values are kept as missing rather than imputed. More than half of the columns are missing for over 50\% of transactions.
-
-\textbf{Sparkov} is the first replication dataset. It contains card transactions for about 1,000 customers produced by the Sparkov transaction simulator between January 2019 and December 2020. After inspection we cut the data at 21 December 2020, because the simulator produces almost no fraud after that date (17 frauds and then none, while the volume doubles), which would make the last weeks meaningless for evaluation. The remaining 1,801,969 transactions cover 720 days with a fraud rate of 0.53\%. Names, street addresses, card numbers and transaction numbers are removed. We derive the transaction hour and weekday, the customer's age, and the distance between customer and merchant, and five per-card behaviour features: the time since the card's previous transaction, its number and total amount of transactions in the previous 24 hours, its number of transactions in the previous 30 days, and the amount relative to the card's running average. Each of these is computed only from the card's \textit{earlier} transactions, so no information from the future leaks into a feature. A lifetime transaction count was deliberately not used: it only grows over time and would drift by construction.
-
-\textbf{Bank Account Fraud (BAF)} is the second replication dataset. It is a privacy-preserving synthetic dataset of one million bank account applications over eight months, generated from real data and designed to contain realistic drift between months. We use the Base variant. Values that the providers document as missing (negative values in six columns) are converted to missing values, a constant column is dropped, and the month itself is not used as a feature, so that the model cannot memorise the period. BAF records only the month of each application, so each record is given a random time within its month with a fixed seed. Drift therefore appears between months, while the weeks within a month are exchangeable. This is a limitation of the dataset, and the BAF results are interpreted accordingly.
-
-All three datasets are sorted by time and never shuffled. Each is split at a fixed fraction of its rows into a \textit{history}, used to train the first model, and a \textit{stream}, which is replayed as if it were arriving live (Figure \ref{fig:protocol}). The stream starts at 60\% of the rows for IEEE-CIS (day 101), and at 50\% for Sparkov and BAF, whose longer histories allow a full year or four months of training data before deployment.
-
 \begin{figure}[htbp]
   \centering
-  \includegraphics[width=\textwidth]{figures/protocol.png}
-  \caption{Evaluation protocol: each dataset is split in time into a history and a stream that is replayed week by week; settings are tuned walk-forward in 4-week folds}
-  \label{fig:protocol}
+  \includegraphics[width=\textwidth]{figures/methodology.png}
+  \caption{Methodology of the study: from literature review and time-ordered data preparation to the retraining experiments, the framework and its evaluation}
+  \label{fig:method}
 \end{figure}
+
+Three principles guide every experiment. First, \textbf{time is respected}: a model is only trained on transactions that happened, and whose labels were available, before the period it is evaluated on \cite{menezes2025}. Second, \textbf{the deployment is simulated, not imagined}: each dataset is replayed as a stream, week by week, and the label delay is applied explicitly, as described by Dal Pozzolo et al. \cite{dalpozzolo2018}. Third, \textbf{differences must survive uncertainty}: every comparison is reported with a confidence interval, the settings of competing strategies are tuned with the same procedure, and the key results are repeated with several training seeds and on a second dataset.
+
+The rest of this section describes the simulated deployment under label delay (Section \ref{sec:deploy}), the retraining strategies (Section \ref{sec:strategies}), the drift and performance measures (Section \ref{sec:measures}), the statistical validation (Section \ref{sec:validation}) and the evaluation of the framework, including fault injection (Section \ref{sec:faults}). Section \ref{sec:spec} specifies the model and the framework, Sections \ref{sec:collection} and \ref{sec:data} describe the data, Section \ref{sec:plan} the project plan, and Section \ref{sec:impl} the implementation.
 
 \subsection{Simulated Deployment under Label Delay}\label{sec:deploy}
 
@@ -193,9 +166,9 @@ Upstream label shuffle & The label store itself is corrupted, so the promotion g
 
 Each fault scenario is replayed twice, once with the promotion gate and once without it, and compared with a clean replay. A safeguard is considered effective if the run with the fault and the safeguard stays close to the clean run, while the run without the safeguard loses performance. Each scenario uses its own MLflow store, so the main registry is never affected.
 
-\section{Preliminary Design or Design (Model) Specification}\label{sec:spec}
+\section{Design (Model) Specification}\label{sec:spec}
 
-This section specifies the design: the fraud detection model used throughout the study, and the drift-aware continuous learning framework built on the results of the experiments, component by component, with its configuration and implementation.
+This section specifies the fraud detection model used throughout the study and the components of the drift-aware continuous learning framework.
 
 \subsection{Fraud Detection Model}\label{sec:model}
 
@@ -244,6 +217,13 @@ The framework turns the experimental findings into a working MLOps system. Its c
 
 \begin{figure}[htbp]
   \centering
+  \includegraphics[width=\textwidth]{figures/framework_loop.png}
+  \caption{The proposed continuous-learning loop, run every week on the transaction stream}
+  \label{fig:loop}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
   \includegraphics[width=\textwidth]{figures/architecture.png}
   \caption{Components of the proposed framework and the flow of data between them}
   \label{fig:architecture}
@@ -288,10 +268,6 @@ A challenger replaces the live model (the \textit{champion}) only if it passes t
 
 with $\delta$ = 0.01. Both models are re-scored through the production feature path rather than with scores stored at training time. This detail is essential: a model trained on wrongly scaled features looks good on its own, equally wrong, validation data, but fails on the inputs it will actually receive in production. If the comparison data contains fewer than 30 frauds, the comparison is not reliable and the challenger is promoted by default.
 
-\subsection{Model Registry, Serving and Dashboard}\label{sec:serving}
-
-MLflow stores every model version with its parameters, metrics and training window. The model in service carries the alias \textit{champion} and its predecessor the alias \textit{previous}, so a rollback is a single alias change. A FastAPI service loads the champion and offers three endpoints: \textit{/health} reports the version being served, \textit{/predict} returns a fraud probability and flag for each submitted transaction, and \textit{/reload} switches to a newly promoted champion without restarting. A monitoring dashboard, generated from the MLflow logs, shows weekly performance, drift, every retraining decision with its reason, and the history of model versions.
-
 \subsection{Framework Configuration}\label{sec:config}
 
 {\footnotesize
@@ -322,8 +298,192 @@ Drift features tracked & 10 & Most important numeric features (PSI logged) \\ \b
 \end{longtable}
 }
 
-\subsection{Implementation and Reproducibility}\label{sec:impl}
+\section{Data Collection}\label{sec:collection}
+
+The study uses three public fraud datasets, summarised in Table \ref{tab:sources}. Public data with reliable timestamps is essential for the research questions, because drift and label delay can only be studied when transactions can be replayed in the order in which they happened. Commonly used fraud datasets that cover only a few days \cite{dang2021,mienye2023} were therefore not suitable.
+
+{\footnotesize
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.32\textwidth}>{\raggedright\arraybackslash}p{0.23\textwidth}>{\raggedright\arraybackslash}p{0.24\textwidth}}
+\caption{Sources of the datasets}\label{tab:sources}\\
+\toprule
+\textbf{Dataset} & \textbf{Source} & \textbf{Files used} & \textbf{Records in the source} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Dataset} & \textbf{Source} & \textbf{Files used} & \textbf{Records in the source} \\
+\midrule
+\endhead
+IEEE-CIS & Kaggle competition IEEE-CIS Fraud Detection (IEEE Computational Intelligence Society and Vesta Corporation) & train\_transaction.csv, train\_identity.csv & 590,540 transactions \\ \midrule
+Sparkov & Kaggle dataset Credit Card Transactions Fraud Detection (generated with the Sparkov simulator) & fraudTrain.csv, fraudTest.csv & 1,852,394 transactions \\ \midrule
+BAF & Kaggle dataset Bank Account Fraud Dataset Suite (NeurIPS 2022) & Base.csv (of six variants) & 1,000,000 applications \\ \bottomrule
+\end{longtable}
+}
+
+All three datasets were downloaded from Kaggle. IEEE-CIS is distributed as a competition dataset, which requires accepting the competition rules; its test files have no labels and were not used. Sparkov is distributed as two files that split one continuous period, and both were combined. BAF is distributed as a base dataset and five variants with controlled biases; the base dataset was used. The raw data is not redistributed with the code: the repository contains the scripts that prepare it, so that every result can be regenerated from the original sources.
+
+Two practical choices made the data collection reproducible. First, every dataset is converted by a preparation script into the same table layout, so all experiments run unchanged on any of them. Second, the long experiments on the two larger replication datasets were run as Kaggle notebooks, next to the data, with the code taken directly from the public repository.
+
+\section{Dataset Overview}\label{sec:data}
+
+This section describes each dataset, the target variable, the cleaning and feature engineering applied to it, and the resulting preprocessed data.
+
+\subsection{IEEE-CIS Fraud Detection}\label{sec:ieeecis}
+
+IEEE-CIS is the main dataset. It was released by the IEEE Computational Intelligence Society and Vesta Corporation and contains 590,540 real e-commerce transactions over 182 days, of which 3.5\% are fraudulent. It has been used in recent studies of drift and fraud detection \cite{menezes2025,uddin2026}. The transaction and identity tables are joined on the transaction identifier, giving 431 features, most of them anonymised by the provider. Only the time column (seconds from a reference point), the identifier and the label are excluded. Text columns are treated as categorical features, which LightGBM handles natively, and missing values are kept as missing rather than imputed. More than half of the columns are missing for over 50\% of transactions.
+
+\subsection{Sparkov Credit Card Transactions}\label{sec:sparkovds}
+
+Sparkov is the first replication dataset. It contains card transactions for about 1,000 customers produced by the Sparkov transaction simulator between January 2019 and December 2020. After inspection we cut the data at 21 December 2020, because the simulator produces almost no fraud after that date (17 frauds and then none, while the volume doubles), which would make the last weeks meaningless for evaluation. The remaining 1,801,969 transactions cover 720 days with a fraud rate of 0.53\%. Names, street addresses, card numbers and transaction numbers are removed. We derive the transaction hour and weekday, the customer's age, and the distance between customer and merchant, and five per-card behaviour features: the time since the card's previous transaction, its number and total amount of transactions in the previous 24 hours, its number of transactions in the previous 30 days, and the amount relative to the card's running average. Each of these is computed only from the card's \textit{earlier} transactions, so no information from the future leaks into a feature. A lifetime transaction count was deliberately not used: it only grows over time and would drift by construction.
+
+\subsection{Bank Account Fraud (BAF)}\label{sec:bafds}
+
+BAF is the second replication dataset. It is a privacy-preserving synthetic dataset of one million bank account applications over eight months, generated from real data and designed to contain realistic drift between months. We use the Base variant. Values that the providers document as missing (negative values in six columns) are converted to missing values, a constant column is dropped, and the month itself is not used as a feature, so that the model cannot memorise the period. BAF records only the month of each application, so each record is given a random time within its month with a fixed seed. Drift therefore appears between months, while the weeks within a month are exchangeable. This is a limitation of the dataset, and the BAF results are interpreted accordingly.
+
+\subsection{Target Variable and Class Imbalance}\label{sec:target}
+
+The target is a binary label that marks a transaction, or an application in the case of BAF, as fraudulent (1) or legitimate (0). It is called isFraud in IEEE-CIS, is\_fraud in Sparkov and fraud\_bool in BAF, and is renamed isFraud in all three. Fraud is rare in every dataset: there are 27.6 legitimate transactions per fraud in IEEE-CIS, 186.1 in Sparkov and 89.7 in BAF. For this reason accuracy is not used as a measure (a model that never predicts fraud would be 96.5\% to 99.5\% accurate), and PR-AUC is the main measure (Section \ref{sec:measures}). The imbalance is handled by weighting the fraud class in training; no oversampling such as SMOTE is used, because resampling can make results look better than they are \cite{dang2021}.
+
+\subsection{Data Cleaning and Feature Engineering}\label{sec:cleaning}
+
+The preprocessing pipeline is shown in Figure \ref{fig:preproc}. In IEEE-CIS, the transaction and identity tables are joined on the transaction identifier, numeric columns are stored in the smallest suitable type to reduce memory, and the 31 text columns are converted to categorical features. Missing values are kept as missing, because LightGBM handles them natively and because missingness itself can carry information: 214 of the 434 columns are missing for more than half of the transactions.
+
+In Sparkov, names, street addresses, card numbers and transaction numbers are removed, and the data is cut at 21 December 2020, after which the simulator produces almost no fraud; this keeps 1,801,969 of 1,852,394 transactions. Time-of-day, weekday, age and the distance between customer and merchant are derived, and five per-card behaviour features are computed only from each card's earlier transactions, so that no information leaks from the future. In BAF, values documented as missing (negative values in six columns) are converted to missing, a constant column is dropped, and the month is not used as a feature.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/preprocessing.png}
+  \caption{Preprocessing pipeline from the raw files of each dataset to the common time-ordered table}
+  \label{fig:preproc}
+\end{figure}
+
+\subsection{Time Ordering and History-Stream Split}\label{sec:split}
+
+All three datasets are sorted by time and never shuffled. Each is split at a fixed fraction of its rows into a \textit{history}, used to train the first model, and a \textit{stream}, which is replayed as if it were arriving live (Figure \ref{fig:protocol}). The stream starts at 60\% of the rows for IEEE-CIS (day 101), and at 50\% for Sparkov and BAF, whose longer histories allow a full year or four months of training data before deployment.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/protocol.png}
+  \caption{Evaluation protocol: each dataset is split in time into a history and a stream that is replayed week by week; settings are tuned walk-forward in 4-week folds}
+  \label{fig:protocol}
+\end{figure}
+
+\subsection{Summary of Preprocessed Data}\label{sec:summarydata}
+
+Table \ref{tab:preprocessed} summarises the data after preprocessing, and Table \ref{tab:datasets} compares the three datasets. Every prepared dataset is a single table with a transaction identifier, a time column in seconds, the isFraud label and the model features, sorted by time.
+
+{\footnotesize
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.32\textwidth}>{\raggedright\arraybackslash}p{0.21\textwidth}>{\raggedright\arraybackslash}p{0.21\textwidth}>{\raggedright\arraybackslash}p{0.21\textwidth}}
+\caption{Summary of the preprocessed data}\label{tab:preprocessed}\\
+\toprule
+\textbf{} & \textbf{IEEE-CIS} & \textbf{Sparkov} & \textbf{BAF} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{} & \textbf{IEEE-CIS} & \textbf{Sparkov} & \textbf{BAF} \\
+\midrule
+\endhead
+Records after preprocessing & 590,540 & 1,801,969 & 1,000,000 \\ \midrule
+Frauds (rate) & 20,663 (3.50\%) & 9,634 (0.53\%) & 11,029 (1.10\%) \\ \midrule
+Legitimate per fraud & 27.6 & 186.1 & 89.7 \\ \midrule
+Features (of which categorical) & 431 (31) & 16 (5) & 29 (5) \\ \midrule
+History: training the first model & 354,324 (60\%) & 900,984 (50\%) & 500,000 (50\%) \\ \midrule
+Stream: replayed week by week & 236,216 (12 weeks) & 900,985 (52 weeks) & 500,000 (19 weeks) \\ \bottomrule
+\end{longtable}
+}
+
+{\footnotesize
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.16\textwidth}>{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.25\textwidth}}
+\caption{Datasets used in this study (after preparation)}\label{tab:datasets}\\
+\toprule
+\textbf{} & \textbf{IEEE-CIS} & \textbf{Sparkov} & \textbf{BAF (Base)} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{} & \textbf{IEEE-CIS} & \textbf{Sparkov} & \textbf{BAF (Base)} \\
+\midrule
+\endhead
+Domain & Real e-commerce card transactions (Vesta) & Simulated card transactions (Sparkov generator) & Bank account opening applications (privacy-preserving synthetic data) \\ \midrule
+Records & 590,540 & 1,801,969 & 1,000,000 \\ \midrule
+Time span & 182 days & 720 days (to 21 Dec 2020) & 8 months \\ \midrule
+Fraud rate & 3.50\% & 0.53\% & 1.10\% \\ \midrule
+Features used & 431 (transaction and identity tables, mostly anonymised) & 16 (amount, time, location, customer and card-history features) & 29 (applicant, request, device and velocity features) \\ \midrule
+Time resolution & Seconds from a reference point & Exact timestamp & Month only (time within the month assigned at random) \\ \midrule
+Stream starts at & 60\% of rows (day 101) & 50\% of rows (about 1 Jan 2020) & 50\% of rows (month 4) \\ \midrule
+Role & Main dataset & Replication & Second replication \\ \bottomrule
+\end{longtable}
+}
+
+\section{Project Management Plan}\label{sec:plan}
+
+The project was organised in three stages that match the thesis deliverables, as shown in Figure \ref{fig:plan}. The first stage covered the literature review, the research questions and the preparation of IEEE-CIS. The second stage covered the experiments, their statistical validation and the design of the framework. The third stage covered the framework's evaluation, the replication on two further datasets, automatic window selection and the changes requested in supervisor feedback.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/project_plan.png}
+  \caption{Project management plan over the three thesis stages}
+  \label{fig:plan}
+\end{figure}
+
+Work proceeded in short iterations: each experiment was planned, run, reviewed and, when its result raised a new question, followed by a further experiment. Several design decisions came out of this cycle. The walk-forward tuning was added when fixed tuning periods proved too short to rank the drift triggers; the promotion gate was changed to re-score models on production features after a fault test exposed a weakness; and automatic window selection was added when the replication showed that the best window depends on the dataset. Supervisor feedback was incorporated in the same way, for example the equal-budget comparison in Section \ref{sec:budget}.
+
+All code and configuration were kept under version control in a Git repository hosted on GitHub, with an automated test suite run before each change. Because single experiments ran for several hours and power cuts were frequent, the long experiments save their results after every completed step and resume where they stopped; the longest runs were moved to Kaggle notebooks.
+
+\section{Implementation of Selected Design}\label{sec:impl}
+
+The selected design was implemented as a Python package with a back end that runs the continuous learning loop, a front end for monitoring, and a model registry that connects them. Table \ref{tab:modules} lists the modules.
+
+\subsection{Back End}\label{sec:backend}
+
+{\footnotesize
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.21\textwidth}>{\raggedright\arraybackslash}p{0.73\textwidth}}
+\caption{Modules of the framework (Python package fraud\_mlops)}\label{tab:modules}\\
+\toprule
+\textbf{Module} & \textbf{Responsibility} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Module} & \textbf{Responsibility} \\
+\midrule
+\endhead
+config & Typed configuration loaded from one TOML file per dataset \\ \midrule
+data & Loading, caching and time-window access to the transaction table \\ \midrule
+training & LightGBM training on a window with a time-ordered validation split \\ \midrule
+model & Scoring of raw input, including missing columns and text categories \\ \midrule
+monitoring & Live PR-AUC on matured labels; PSI of scores and features \\ \midrule
+policy & Retraining policy, safety net, candidate windows and promotion gate \\ \midrule
+registry & MLflow runs and model registry with champion and previous aliases \\ \midrule
+pipeline & The replay loop: monitor, decide, retrain, gate and serve \\ \midrule
+faults & Fault injection for testing the safeguards \\ \midrule
+serving & FastAPI scoring service for the champion model \\ \midrule
+dashboard & Self-contained HTML monitoring dashboard \\ \midrule
+cli & Command line: replay, champion, dashboard and serve \\ \bottomrule
+\end{longtable}
+}
 
 The study is implemented in Python with LightGBM, pandas, NumPy and scikit-learn for the experiments, MLflow with an SQLite backend for tracking and the model registry, and FastAPI for the scoring service. The framework is organised as a Python package with separate modules for configuration, data access, training, monitoring, the retraining policy, the promotion gate, the registry, fault injection, serving and the dashboard, and is configured with one TOML file per dataset. Twenty-four automated tests on small synthetic data check the components and the full loop.
 
-The long experiments, which take several hours each, save their results after every completed label delay or seed and can resume after an interruption such as a power cut. One runner script reproduces the whole replication on any of the datasets, and Kaggle notebooks run it, and the window-selection comparison, on Kaggle's CPU servers. The experiments were run on a desktop computer and on Kaggle notebooks with four CPU cores. All code, configurations and instructions are kept in a public Git repository, so that every number in this thesis can be regenerated from the public datasets.
+The back end is driven from the command line. \textit{replay} runs the loop over a dataset as if it were live, \textit{champion} reports the model in service, \textit{dashboard} builds the monitoring dashboard and \textit{serve} starts the scoring service. Every training run is logged to MLflow with its parameters, metrics and training window, and every model is registered as a new version.
+
+\subsection{Front End}\label{sec:frontend}
+
+The front end is a monitoring dashboard, generated as a single HTML page from the MLflow logs of a replay, that can be opened in any browser without a server. It shows the summary figures of the run, the weekly performance of the served model together with what the loop could measure on delayed labels and the safety-net line (Figure \ref{fig:dashtop}), the drift measures, every retraining decision with its reason, and the history of model versions with the champion and the version kept for rollback (Figure \ref{fig:dashlog}).
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/dashboard_top.png}
+  \caption{Front end: the monitoring dashboard after a replay of IEEE-CIS (summary figures and the performance of the served model)}
+  \label{fig:dashtop}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/dashboard_log.png}
+  \caption{Front end: decision log and model versions on the monitoring dashboard}
+  \label{fig:dashlog}
+\end{figure}
+
+\subsection{Frontend-Backend Integration}\label{sec:integration}
+
+MLflow stores every model version with its parameters, metrics and training window. The model in service carries the alias \textit{champion} and its predecessor the alias \textit{previous}, so a rollback is a single alias change. A FastAPI service loads the champion and offers three endpoints: \textit{/health} reports the version being served, \textit{/predict} returns a fraud probability and flag for each submitted transaction, and \textit{/reload} switches to a newly promoted champion without restarting. A monitoring dashboard, generated from the MLflow logs, shows weekly performance, drift, every retraining decision with its reason, and the history of model versions.
+
+The MLflow model registry is the contract between the parts: the back end writes model versions and moves the \textit{champion} alias when the promotion gate accepts a challenger, the scoring service loads whatever carries that alias and reloads it on request, and the dashboard reads the same registry and run logs. No component needs to know how the others work, so the scoring service always serves the model the gate last approved.

@@ -3,7 +3,10 @@ template: unnumbered title page, roman-numbered front matter, 'Chapter N' headin
 figures and tables, IEEE-numbered bibliography.
 
   python build_pdf.py                ->  P1_Drift_Aware_Continuous_Learning_MLOps.pdf (ch. 1-2)
-  python build_pdf.py --chapters 3   ->  Thesis_Draft_Ch1-3.pdf (full draft so far)
+  python build_pdf.py --p2           ->  P2_Methodology_and_Design.pdf (Chapter 4)
+  python build_pdf.py --chapters 4   ->  Thesis_Draft_Ch1-4.pdf (full draft so far)
+  python build_pdf.py --report       ->  Thesis_Report.pdf (full report, BRAC template structure)
+  python build_pdf.py --report-empty ->  Thesis_Report_Ch1-3_Empty.pdf (same, Chapters 1-3 empty)
 """
 
 import os
@@ -11,7 +14,11 @@ import re
 import sys
 
 N_CHAPTERS = int(sys.argv[sys.argv.index("--chapters") + 1]) if "--chapters" in sys.argv else 2
+MODE = ("report_empty" if "--report-empty" in sys.argv
+        else "report" if "--report" in sys.argv else "p2" if "--p2" in sys.argv
+        else "draft" if "--chapters" in sys.argv else "p1")
 os.environ["THESIS_CHAPTERS"] = str(N_CHAPTERS)      # read by content.py
+os.environ["THESIS_MODE"] = MODE
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
@@ -26,8 +33,11 @@ import content as C
 from markup import numbering, resolve
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "P1_Drift_Aware_Continuous_Learning_MLOps.pdf" if N_CHAPTERS == 2
-                   else f"Thesis_Draft_Ch1-{N_CHAPTERS}.pdf")
+OUT = os.path.join(HERE, {"p1": "P1_Drift_Aware_Continuous_Learning_MLOps.pdf",
+                         "p2": "P2_Methodology_and_Design.pdf",
+                         "report": "Thesis_Report.pdf",
+                         "report_empty": "Thesis_Report_Ch1-3_Empty.pdf",
+                         "draft": f"Thesis_Draft_Ch1-{N_CHAPTERS}.pdf"}[MODE])
 MARGIN = 1.0 * inch
 TEXT_W = A4[0] - 2 * MARGIN
 CITES, FIGS, TABS = numbering()
@@ -45,6 +55,8 @@ S = {
                                 spaceAfter=26),
     "section": ParagraphStyle("section", fontName=BOLD, fontSize=14.5, leading=19,
                               spaceBefore=12, spaceAfter=8, keepWithNext=1),
+    "subsection": ParagraphStyle("subsection", fontName=BOLD, fontSize=12.5, leading=17,
+                                 spaceBefore=8, spaceAfter=6, keepWithNext=1),
     "caption": ParagraphStyle("caption", fontName=BASE, fontSize=11, leading=14,
                               alignment=TA_CENTER, spaceBefore=6, spaceAfter=14),
     "tcaption": ParagraphStyle("tcaption", fontName=BASE, fontSize=11, leading=14,
@@ -150,7 +162,9 @@ def toc_styles(size=12):
     return [ParagraphStyle("t0", fontName=BOLD, fontSize=size, leading=size + 6, leftIndent=0,
                            firstLineIndent=0, spaceBefore=5),
             ParagraphStyle("t1", fontName=BASE, fontSize=size, leading=size + 5, leftIndent=22,
-                           firstLineIndent=0)]
+                           firstLineIndent=0),
+            ParagraphStyle("t2", fontName=BASE, fontSize=size - 1, leading=size + 4,
+                           leftIndent=50, firstLineIndent=0)]
 
 
 def front_heading(title, story):
@@ -316,9 +330,15 @@ def blocks(story, num, ch):
     for s, sec in enumerate(ch["sections"], start=1):
         story.append(Entry(f"{num}.{s}&nbsp;&nbsp;&nbsp;{sec['title']}", S["section"], level=1,
                            entry=f"{num}.{s}&nbsp;&nbsp;{sec['title']}"))
+        nsub = 0
         for block in sec["blocks"]:
             kind = block[0]
-            if kind == "p":
+            if kind == "sub":
+                nsub += 1
+                label = f"{num}.{s}.{nsub}"
+                story.append(Entry(f"{label}&nbsp;&nbsp;&nbsp;{block[1]}", S["subsection"], level=2,
+                                   entry=f"{label}&nbsp;&nbsp;{block[1]}"))
+            elif kind == "p":
                 story.append(Paragraph(rich(block[1]), S["body"]))
             elif kind == "list":
                 items, numbered = block[1], block[2]
@@ -358,8 +378,8 @@ def main():
     abstract_ack(story)
     listings(story)
     story.append(MainStart())
-    for i, ch in enumerate(C.CHAPTERS, start=1):
-        chapter(story, i, ch, page_break=i > 1)
+    for i, ch in enumerate(C.CHAPTERS, start=C.FIRST_CHAPTER):
+        chapter(story, i, ch, page_break=i > C.FIRST_CHAPTER)
     bibliography(story)
     doc = Doc(OUT)
     for listing in LISTINGS:

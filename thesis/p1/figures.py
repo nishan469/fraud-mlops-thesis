@@ -27,7 +27,9 @@ def arrow(ax, x1, y1, x2, y2, rad=0.0):
                                  color=MUTED, lw=1.4, connectionstyle=f"arc3,rad={rad}"))
 
 
-def methodology(path):
+def methodology(path, three_datasets=False):
+    """Study workflow. `three_datasets`: the later version (IEEE-CIS, Sparkov and BAF, with
+    window selection); the P1 keeps the original two-dataset figure."""
     fig, ax = plt.subplots(figsize=(10, 4.6))
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 4.6)
@@ -41,6 +43,10 @@ def methodology(path):
               ("7. Fault injection and\nreplication", "Corrupted labels, outage,\nunit bug; repeat key\nexperiments on Sparkov"),
               ("6. MLOps framework", "Monitor, decide, retrain,\npromotion gate, serve;\nMLflow, API, dashboard"),
               ("5. Statistical validation", "Day-block bootstrap CIs,\nwalk-forward tuning,\n5 training seeds")]
+    if three_datasets:
+        top[1] = ("2. Data preparation", "IEEE-CIS, Sparkov, BAF;\nstrict time order,\nno future leakage")
+        bottom[1] = ("7. Fault injection and\nreplication", "Corrupted labels, outage,\nunit bug; repeat all\non Sparkov and BAF")
+        bottom[2] = ("6. MLOps framework", "Monitor, retrain, select\nwindow, promotion gate;\nMLflow, API, dashboard")
     xs = [0.15, 2.65, 5.15, 7.65]
     for (t, b), x in zip(top, xs):
         box(ax, x, 2.8, w, h, t, b)
@@ -262,7 +268,122 @@ def architecture(path):
     plt.close(fig)
 
 
+def model_architecture(path):
+    """LightGBM as used in the study: features -> boosted trees -> summed score -> sigmoid ->
+    probability -> threshold -> flag."""
+    fig, ax = plt.subplots(figsize=(10, 3.9))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 3.9)
+    ax.axis("off")
+
+    def tree(cx, cy, s=0.28, colour=ACCENT):
+        pts = {"r": (cx, cy + s), "a": (cx - s, cy), "b": (cx + s, cy),
+               "a1": (cx - 1.5 * s, cy - s), "a2": (cx - 0.5 * s, cy - s),
+               "b1": (cx + 0.5 * s, cy - s), "b2": (cx + 1.5 * s, cy - s)}
+        for u, v in (("r", "a"), ("r", "b"), ("a", "a1"), ("a", "a2"), ("b", "b1"), ("b", "b2")):
+            ax.plot(*zip(pts[u], pts[v]), color=MUTED, lw=1)
+        for k, (x, y) in pts.items():
+            leaf = k in ("a1", "a2", "b1", "b2")
+            ax.add_patch(plt.Circle((x, y), 0.065, color="#1baf7a" if leaf else colour, zorder=3))
+
+    box(ax, 0.05, 0.75, 1.75, 2.45, "Input features",
+        "one transaction:\namount, time,\ncard history,\ndevice, ...\n(16 to 431\nfeatures)", fill="#F6F5F1",
+        edge="#8A96A8")
+    ax.add_patch(FancyBboxPatch((2.25, 0.45), 4.15, 3.05, boxstyle="round,pad=0.02,rounding_size=0.08",
+                                fc=FILL, ec=ACCENT, lw=1.4))
+    ax.text(4.32, 3.3, "LightGBM: gradient-boosted decision trees", ha="center", va="top",
+            fontsize=10.5, fontweight="bold", color=INK)
+    for i, (cx, lab) in enumerate(((2.95, "tree 1"), (4.05, "tree 2"), (5.75, "tree T"))):
+        tree(cx, 2.15)
+        ax.text(cx, 1.42, lab, ha="center", fontsize=9, color=INK)
+    ax.text(4.9, 2.1, "...", ha="center", va="center", fontsize=16, color=MUTED)
+    for x1, x2 in ((3.35, 3.65), (4.45, 4.7), (5.1, 5.35)):
+        arrow(ax, x1, 2.15, x2, 2.15)
+    ax.text(4.32, 1.08, "each tree corrects the errors of the trees before it\n"
+            "up to 2,000 trees, 256 leaves each; early stopping on validation AUC\n"
+            "fraud class weighted by (legitimate / fraud) count",
+            ha="center", va="top", fontsize=8.2, color=MUTED, linespacing=1.4)
+    box(ax, 6.85, 2.0, 1.35, 1.2, "Score", "F(x) = sum of\ntree outputs")
+    box(ax, 6.85, 0.6, 1.35, 1.2, "Probability", "p = sigmoid(F)\nbetween 0 and 1")
+    box(ax, 8.6, 0.6, 1.35, 2.6, "Decision", "flag as fraud if\np >= threshold\n\n(threshold that\nmaximises F1 on\nvalidation data)",
+        edge="#C8581E")
+    arrow(ax, 1.8, 1.95, 2.25, 1.95)
+    arrow(ax, 6.4, 2.6, 6.85, 2.6)
+    arrow(ax, 7.52, 2.0, 7.52, 1.8)
+    arrow(ax, 8.2, 1.2, 8.6, 1.2)
+    plt.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def preprocessing(path):
+    """Data preprocessing pipeline from the raw files of each dataset to the common
+    time-ordered table used by every experiment."""
+    fig, ax = plt.subplots(figsize=(10, 2.75))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 2.75)
+    ax.axis("off")
+    w, h, y = 1.72, 2.0, 0.55
+    steps = [
+        ("1. Raw data", "IEEE-CIS: 2 tables\nSparkov: 2 CSVs\nBAF: Base.csv", "#F6F5F1", "#8A96A8"),
+        ("2. Merge & clean", "join on Transaction ID;\ndrop names, cards,\naddresses; -1 = missing;\nSparkov cut at\n21 Dec 2020", FILL, ACCENT),
+        ("3. Features", "hour, weekday, age,\ndistance; card history\nfrom EARLIER\ntransactions only;\ntext -> categories", FILL, ACCENT),
+        ("4. Time order", "sort by time,\nnever shuffle;\nBAF: random time\ninside each month", FILL, ACCENT),
+        ("5. Split", "history (first\n50-60%) trains the\nfirst model; the rest\nis the replayed\nstream", FILL2, "#C8581E"),
+    ]
+    xs = [0.05 + i * 2.0 for i in range(5)]
+    for (t, b, fill, edge), x in zip(steps, xs):
+        box(ax, x, y, w, h, t, b, fill=fill, edge=edge)
+    for i in range(4):
+        arrow(ax, xs[i] + w, y + h / 2, xs[i + 1], y + h / 2)
+    ax.text(5.0, 0.2, "output: one table per dataset with TransactionID, TransactionDT (seconds), "
+            "isFraud and the model features", ha="center", fontsize=9, color=MUTED, style="italic")
+    plt.tight_layout()
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def project_plan(path):
+    """Gantt-style plan of the work over the three thesis stages (P1, P2, final report)."""
+    tasks = [
+        ("Literature review and research questions", 0.0, 1.1, ACCENT),
+        ("Data acquisition and preparation (IEEE-CIS)", 0.4, 1.3, ACCENT),
+        ("Static baseline and drift analysis", 0.8, 1.6, ACCENT),
+        ("Retraining simulation and label-delay sweep", 1.1, 2.0, ACCENT),
+        ("Statistical validation: walk-forward, seeds", 1.6, 2.3, ACCENT),
+        ("MLOps framework: registry, gate, API, dashboard", 1.8, 2.6, "#C8581E"),
+        ("Fault injection and safety-net fix", 2.2, 2.7, "#C8581E"),
+        ("Replication on Sparkov and BAF", 2.3, 2.9, "#C8581E"),
+        ("Automatic window selection", 2.6, 3.0, "#C8581E"),
+        ("Supervisor feedback: equal budget, load test", 2.9, 3.4, "#C8581E"),
+        ("Writing: P1, P2 and final report", 0.6, 3.6, "#8A96A8"),
+    ]
+    fig, ax = plt.subplots(figsize=(10, 4.4))
+    for i, (name, a, b, colour) in enumerate(tasks):
+        ax.barh(i, b - a, left=a, height=0.56, color=colour, alpha=0.9)
+        ax.text(-0.05, i, name, ha="right", va="center", fontsize=8.6, color=INK)
+    for x, lab in ((0, "Stage 1: P1"), (1.2, "Stage 2: P2"), (2.4, "Stage 3: final report")):
+        ax.axvline(x, color="#9AA3AF", lw=0.8, ls=":")
+        ax.text(x + 0.6, -1.0, lab, ha="center", fontsize=9.5, fontweight="bold", color=MUTED)
+    ax.set_ylim(len(tasks) - 0.4, -1.5)
+    ax.set_xlim(0, 3.6)
+    ax.axis("off")
+    for x, lab, colour in ((0.45, "research and experiments", ACCENT),
+                           (1.75, "framework and evaluation", "#C8581E"),
+                           (3.0, "writing", "#8A96A8")):
+        ax.barh(len(tasks) + 0.3, 0.12, left=x - 0.3, height=0.3, color=colour)
+        ax.text(x - 0.13, len(tasks) + 0.3, lab, va="center", fontsize=8.5, color=MUTED)
+    ax.set_ylim(len(tasks) + 0.8, -1.5)
+    plt.subplots_adjust(left=0.36, right=0.99, top=0.97, bottom=0.03)
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
+    project_plan(os.path.join(HERE, "figures", "project_plan.png"))
+    preprocessing(os.path.join(HERE, "figures", "preprocessing.png"))
+    model_architecture(os.path.join(HERE, "figures", "model_architecture.png"))
+    methodology(os.path.join(HERE, "figures", "methodology_3ds.png"), three_datasets=True)
 
     os.makedirs(os.path.join(HERE, "figures"), exist_ok=True)
     protocol(os.path.join(HERE, "figures", "protocol.png"))

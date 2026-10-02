@@ -1,0 +1,33 @@
+\chapter{Conclusion}
+
+\section{Summary of Findings}\label{sec:findings}
+
+This thesis set out to design and evaluate a drift-aware continuous learning MLOps framework for financial transaction fraud detection that identifies when a deployed model is becoming outdated, decides when retraining is necessary, and deploys a better model safely. Replaying three public datasets under realistic label delay led to five main findings:
+
+\begin{enumerate}
+  \item Label-free drift indicators did not reflect model performance: they missed a loss of a third of the PR-AUC on IEEE-CIS and signalled strong drift on Sparkov and BAF, where performance did not fall.
+  \item Retraining improved performance on every dataset when its training window suited the data, but label delay eroded its benefit: on IEEE-CIS the gain fell from +0.078 PR-AUC with immediate labels to +0.010 with a 60-day delay.
+  \item Tuned fairly, drift-triggered retraining was never reliably better than a fixed schedule and was reliably worse in seven of nine comparisons; with delayed labels the schedule matched or beat it also at an equal retraining budget, while with immediate labels a trigger could retrain more economically.
+  \item The training window mattered more than the trigger, and automatic window selection matched the best fixed window on two datasets and came within 0.005 PR-AUC on the third.
+  \item The framework reproduced the offline results in a full replay, its promotion gate blocked every faulty model it could observe, and its safety net limited the damage of the fault it could not observe to one week.
+\end{enumerate}
+
+\section{Contributions to the Field}\label{sec:contributions}
+
+\begin{enumerate}
+  \item An evaluation of retraining policies for fraud detection on public data in strict time order, with explicit label delay, paired bootstrap intervals, walk-forward tuning, repeated seeds and three datasets.
+  \item Evidence, on natural drift, that label-free drift indicators are an unreliable trigger for retraining fraud models, and a definition of drift-awareness based on delayed-label performance instead.
+  \item An equal-budget comparison showing that, under label delay, the advantage of scheduled retraining is not only due to retraining more often.
+  \item A drift-aware MLOps framework with delayed-label monitoring, a scheduled policy with a safety net, automatic window selection and a promotion gate that re-scores models on production features, tested by fault injection.
+  \item Open, reproducible code with resumable experiments and Kaggle notebooks, so that every result can be regenerated from the public datasets.
+\end{enumerate}
+
+\section{Recommendations for Future Work}\label{sec:future}
+
+\begin{enumerate}
+  \item Complete the equal-budget comparison on Sparkov, and load test the scoring service (throughput and p95/p99 latency at increasing concurrency), as recommended in supervisor feedback.
+  \item Model faster investigator feedback alongside delayed chargebacks, which could make performance-based triggers react sooner.
+  \item Repeat the study with other model families, such as neural and online learners, to test whether the findings depend on gradient boosted trees.
+  \item Monitor the stability of model explanations under drift \cite{john2025,uddin2026} and drift in several data sources separately \cite{hassan2026}.
+  \item Deploy the framework on a live transaction stream with real label feeds, for example behind a streaming platform \cite{kaushik2025}.
+\end{enumerate}

@@ -8,6 +8,13 @@ This section describes how the study was designed and carried out: the overall r
 
 This study is an empirical, simulation-based investigation followed by the design and evaluation of a software framework. Chapter 2 showed that the claims made for drift-triggered retraining rest mostly on artificial drift, single datasets and labels that arrive immediately \cite{shakil2025,wong2025,yelleti2025}. We therefore first measure, on public fraud data with natural drift, how a deployed model behaves and which retraining policy works best under label delay (research questions RQ1 to RQ3), and only then design the framework around the result and test it (RQ4). The study follows the workflow in Figure \ref{fig:method}.
 
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/methodology.png}
+  \caption{Methodology of the study: from literature review and time-ordered data preparation to the retraining experiments, the framework and its evaluation}
+  \label{fig:method}
+\end{figure}
+
 Three principles guide every experiment. First, \textbf{time is respected}: a model is only trained on transactions that happened, and whose labels were available, before the period it is evaluated on \cite{menezes2025}. Second, \textbf{the deployment is simulated, not imagined}: each dataset is replayed as a stream, week by week, and the label delay is applied explicitly, as described by Dal Pozzolo et al. \cite{dalpozzolo2018}. Third, \textbf{differences must survive uncertainty}: every comparison is reported with a confidence interval, the settings of competing strategies are tuned with the same procedure, and the key results are repeated with several training seeds and on a second dataset.
 
 The rest of this section describes the datasets and their preparation (Section \ref{sec:data}), the simulated deployment under label delay (Section \ref{sec:deploy}), the retraining strategies (Section \ref{sec:strategies}), the drift and performance measures (Section \ref{sec:measures}), the statistical validation (Section \ref{sec:validation}) and the evaluation of the framework, including fault injection (Section \ref{sec:faults}). Section \ref{sec:spec} then specifies the design: the fraud detection model and each component of the framework.
@@ -247,6 +254,13 @@ The framework turns the experimental findings into a working MLOps system. Its c
   \includegraphics[width=\textwidth]{figures/architecture.png}
   \caption{Components of the proposed framework and the flow of data between them}
   \label{fig:architecture}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/framework_loop.png}
+  \caption{The proposed continuous-learning loop, run every week on the transaction stream}
+  \label{fig:loop}
 \end{figure}
 
 \subsection{Monitoring on Delayed Labels}\label{sec:monitor}

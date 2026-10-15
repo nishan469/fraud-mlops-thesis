@@ -231,7 +231,7 @@ The upstream fault, which corrupts the label store that the gate itself reads, p
 
 \section{Final Design Adjustments}\label{sec:adjust}
 
-Three changes were made to the design during the evaluation, each prompted by a result.
+Four changes were made to the design during the evaluation, each prompted by a result.
 
 \subsection{Promotion Gate on Production Features}\label{sec:adj_gate}
 
@@ -251,6 +251,39 @@ Originally the safety net compared live PR-AUC with the model's own validation P
   \caption{Framework replays (30-day label delay): gain in mean weekly PR-AUC over the static model for each training-window choice, with 95\% bootstrap intervals over weeks}
   \label{fig:window}
 \end{figure}
+
+\subsection{Scoring Service under Load}\label{sec:adj_load}
+
+As recommended in supervisor feedback, the scoring API was load tested. The service ran as one uvicorn process with the IEEE-CIS champion model, and a client on the same machine (Intel Core i5-12400F, 6 cores and 12 threads, 16 GB memory) sent real stream transactions with all 433 raw fields to POST /predict. Each level ran for 30 seconds after a 5-second warm-up, with 1, 10, 50 and 100 concurrent clients that each wait for an answer before sending the next request, and with batches of 1 to 1,000 transactions per request. Latency was measured at the client, so it includes encoding and the HTTP round trip.
+
+The first test showed that the service could not score in real time: it handled about 14 requests per second whatever the number of clients, and with 100 clients the 95th-percentile latency reached 8 seconds (Table \ref{tab:loadtest}). Profiling one request showed that almost all of the 57 ms went into converting the JSON input into a typed table of 433 columns and into LightGBM's per-call handling of that table, while evaluating the trees took about 0.2 ms. The scoring path was therefore changed: categorical values are mapped once to the booster's own training category codes, requests below 1,000 transactions are converted directly from the JSON records into a numeric matrix, and small requests are scored on one thread so that concurrent requests do not compete for the same cores. The scores are identical to the earlier path (maximum difference 0 on 20,000 stream transactions, with unknown categories, missing fields and text in numeric fields covered by a unit test).
+
+{\footnotesize
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}}
+\caption{Scoring API load test, one transaction per request, 30 s per level: before and after the change to the scoring path (same model, identical scores)}\label{tab:loadtest}\\
+\toprule
+\textbf{Concurrent clients} & \textbf{Requests/s before} & \textbf{Requests/s after} & \textbf{p50 ms before} & \textbf{p50 ms after} & \textbf{p95 ms before} & \textbf{p95 ms after} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Concurrent clients} & \textbf{Requests/s before} & \textbf{Requests/s after} & \textbf{p50 ms before} & \textbf{p50 ms after} & \textbf{p95 ms before} & \textbf{p95 ms after} \\
+\midrule
+\endhead
+1 & 18 & 810 & 57 & 1.2 & 61 & 1.7 \\ \midrule
+10 & 14 & 1,314 & 693 & 7.6 & 938 & 8.9 \\ \midrule
+50 & 14 & 1,323 & 3,478 & 37 & 4,523 & 41 \\ \midrule
+100 & 14 & 1,295 & 7,075 & 76 & 7,966 & 82 \\ \bottomrule
+\end{longtable}
+}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/results_loadtest.png}
+  \caption{Load test of the scoring API before and after the change to the scoring path: throughput and 95th-percentile latency with one transaction per request, and batch throughput after the change (median latency in brackets)}
+  \label{fig:loadtest}
+\end{figure}
+
+After the change a single request took 1.2 ms at the median, the service reached about 1,300 requests per second from 10 clients on, and the 95th-percentile latency stayed below 10 ms with 10 clients and at 82 ms with 100, with no failed requests. Batching raised throughput to about 4,000 transactions per second at 1,000 transactions per request. Throughput levels off at about 1,300 requests per second because a single process handles the Python part of each request one at a time; more worker processes would scale it further. As the client shared the machine with the service, the figures are a conservative estimate for this hardware.
 
 \section{Summary of Results}\label{sec:summary}
 
@@ -302,6 +335,35 @@ BAF & 0 d & +0.006 (5/5) & -0.006 (0/5) & -0.006 (0/5) \\ \midrule
 
 Because many comparisons are reported, a single interval that excludes zero should not be over-interpreted. The conclusions of this thesis rest instead on patterns that hold across label delays, datasets, seeds and analyses: for example, the drift trigger was reliably worse than the schedule in seven of nine walk-forward comparisons and never reliably better in any of them, and the equal-budget analysis pointed the same way whenever labels were delayed.
 
+\textbf{Client identity in IEEE-CIS.} The IEEE-CIS labels mark a card as fraud after a chargeback and then also mark later transactions linked to the same account, email or billing address as fraud. The same client can therefore be fraud both in a model's training data and in the weeks it scores, and part of a model's skill may come from recognising known fraudulent clients rather than fraud patterns. To measure this, a client identifier was reconstructed in the way common in the Kaggle competition (card1, addr1 and the day the account was opened, derived from D1), and every stream row was assigned, using only labels available at its time, to one of four groups: clients with an already known fraud, clients seen before without fraud, new clients, and rows without an identifier (missing addr1 or D1). The static model and the two 14-day schedules were then evaluated on each subset at a 30-day label delay (Table \ref{tab:leakage}, Figure \ref{fig:leakage}).
+
+{\footnotesize
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.21\textwidth}>{\raggedright\arraybackslash}p{0.09\textwidth}>{\raggedright\arraybackslash}p{0.10\textwidth}>{\raggedright\arraybackslash}p{0.10\textwidth}>{\raggedright\arraybackslash}p{0.13\textwidth}>{\raggedright\arraybackslash}p{0.15\textwidth}>{\raggedright\arraybackslash}p{0.15\textwidth}}
+\caption{IEEE-CIS stream rows by client group at a 30-day label delay, and mean weekly PR-AUC of the static model and the two schedules (gain over static in brackets)}\label{tab:leakage}\\
+\toprule
+\textbf{Rows scored} & \textbf{Share of rows} & \textbf{Share of frauds} & \textbf{Fraud rate} & \textbf{Static} & \textbf{Schedule, last 60 days} & \textbf{Schedule, all history} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Rows scored} & \textbf{Share of rows} & \textbf{Share of frauds} & \textbf{Fraud rate} & \textbf{Static} & \textbf{Schedule, last 60 days} & \textbf{Schedule, all history} \\
+\midrule
+\endhead
+All rows & 100\% & 100\% & 3.7\% & 0.474 & 0.530 (+0.056) & 0.502 (+0.028) \\ \midrule
+Without known-fraud clients & 99.1\% & 85.9\% & 3.2\% & 0.519 & 0.545 (+0.027) & 0.541 (+0.022) \\ \midrule
+New clients only & 51.4\% & 43.8\% & 3.1\% & 0.304 & 0.343 (+0.039) & 0.335 (+0.031) \\ \midrule
+Known-fraud clients & 0.9\% & 14.1\% & 60.0\% & - & - & - \\ \bottomrule
+\end{longtable}
+}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/results_leakage.png}
+  \caption{Client-identity check on IEEE-CIS at a 30-day label delay: mean weekly PR-AUC (left) and gain over the static model (right) on all stream rows, without clients with an already known fraud, and on new clients only (95\% intervals)}
+  \label{fig:leakage}
+\end{figure}
+
+The label propagation is clearly visible: 60\% of the transactions of clients with a known fraud were fraud, against 3.1\% for new clients, and these clients made up 0.9\% of the stream but 14\% of its frauds. Removing them roughly halved the gain of the 60-day schedule over the static model, from +0.056 to +0.027 PR-AUC, because retrained models learn the frauds of clients flagged after the first model was trained; the static model's own PR-AUC rose rather than fell. The gains nevertheless remained reliably positive in every subset, including new clients only (+0.039, interval 0.030 to 0.049), and the ranking of the strategies did not change. The retraining gains reported for IEEE-CIS therefore partly reflect this property of the dataset, which a real bank that knows its charged-back clients would also exploit, but the conclusions do not depend on it. New clients were much harder to score (PR-AUC 0.30 against 0.47 overall). The identifier is an approximation, and 41\% of the stream's frauds fall in rows without one, so the check covers part of the data only.
+
 \section{Discussions}\label{sec:discussion}
 
 \textbf{Drift indicators and delayed labels.} The central finding is that label-free drift indicators did not reflect what mattered. They stayed quiet while the IEEE-CIS model lost a third of its PR-AUC, and they signalled strong drift on Sparkov and BAF while the models were unaffected. Shakil et al. noted that statistical drift does not always mean lower performance \cite{shakil2025}; on natural drift in fraud data we observed this in both directions. For a fraud system this means that drift alarms should inform investigation, not trigger retraining, and that the performance on matured labels is the signal to watch, even though it arrives late. This is the sense in which the framework is drift-aware.
@@ -312,4 +374,4 @@ Because many comparisons are reported, a single interval that excludes zero shou
 
 \textbf{Safe automation.} Automated retraining will eventually train on bad data. The fault tests show that a promotion gate that re-scores models on production data stops faults it can observe, and that a safety net based on live performance limits the damage of faults it cannot. Closed-loop MLOps frameworks such as HAMF \cite{reda2025} automate the loop; this thesis adds evidence on how such safeguards behave when labels arrive late.
 
-\textbf{Limitations.} The deployment is replayed from historical data, so live latency and the behaviour of a real chargeback feed are not observed, and every label arrives after the same delay, without faster investigator feedback. One model family is used throughout. IEEE-CIS covers only six months, Sparkov is simulated, and BAF records only the month of each application, so drift within a month cannot appear. The equal-budget comparison is complete on IEEE-CIS and BAF and under way on Sparkov, and the scoring service has not yet been load tested.
+\textbf{Limitations.} The deployment is replayed from historical data, so live latency and the behaviour of a real chargeback feed are not observed, and every label arrives after the same delay, without faster investigator feedback. One model family is used throughout. IEEE-CIS covers only six months, Sparkov is simulated, and BAF records only the month of each application, so drift within a month cannot appear. In IEEE-CIS, fraud labels are propagated to linked transactions of the same client; the check in Section \ref{sec:statistics} shows that this roughly halves the retraining gain once clients with a known fraud are excluded, without changing the conclusions. The equal-budget comparison is complete on IEEE-CIS and BAF and under way on Sparkov, and the scoring service was load tested on one machine, with one worker process and the load generator on the same machine.

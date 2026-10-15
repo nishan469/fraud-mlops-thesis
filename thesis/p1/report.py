@@ -120,9 +120,46 @@ FIGURES = {
                "Equal-budget comparison on IEEE-CIS (top) and BAF (bottom): the best mean weekly "
                "PR-AUC each family reaches with at most a given number of retrains (dots: "
                "individual settings)"),
+    "loadtest": ("figures/results_loadtest.png",
+                 "Load test of the scoring API before and after the change to the scoring path: "
+                 "throughput and 95th-percentile latency with one transaction per request, and "
+                 "batch throughput after the change (median latency in brackets)"),
+    "leakage": ("figures/results_leakage.png",
+                "Client-identity check on IEEE-CIS at a 30-day label delay: mean weekly PR-AUC "
+                "(left) and gain over the static model (right) on all stream rows, without "
+                "clients with an already known fraud, and on new clients only (95% intervals)"),
 }
 
 TABLES = {
+    "loadtest": {
+        "caption": "Scoring API load test, one transaction per request, 30 s per level: before "
+                   "and after the change to the scoring path (same model, identical scores)",
+        "widths": [0.16, 0.14, 0.14, 0.14, 0.14, 0.14, 0.14],
+        "header": ["Concurrent clients", "Requests/s before", "Requests/s after",
+                   "p50 ms before", "p50 ms after", "p95 ms before", "p95 ms after"],
+        "rows": [
+            ["1", "18", "810", "57", "1.2", "61", "1.7"],
+            ["10", "14", "1,314", "693", "7.6", "938", "8.9"],
+            ["50", "14", "1,323", "3,478", "37", "4,523", "41"],
+            ["100", "14", "1,295", "7,075", "76", "7,966", "82"],
+        ],
+    },
+    "leakage": {
+        "caption": "IEEE-CIS stream rows by client group at a 30-day label delay, and mean "
+                   "weekly PR-AUC of the static model and the two schedules (gain over static "
+                   "in brackets)",
+        "widths": [0.22, 0.1, 0.11, 0.11, 0.14, 0.16, 0.16],
+        "header": ["Rows scored", "Share of rows", "Share of frauds", "Fraud rate", "Static",
+                   "Schedule, last 60 days", "Schedule, all history"],
+        "rows": [
+            ["All rows", "100%", "100%", "3.7%", "0.474", "0.530 (+0.056)", "0.502 (+0.028)"],
+            ["Without known-fraud clients", "99.1%", "85.9%", "3.2%", "0.519",
+             "0.545 (+0.027)", "0.541 (+0.022)"],
+            ["New clients only", "51.4%", "43.8%", "3.1%", "0.304", "0.343 (+0.039)",
+             "0.335 (+0.031)"],
+            ["Known-fraud clients", "0.9%", "14.1%", "60.0%", "-", "-", "-"],
+        ],
+    },
     "sources": {
         "caption": "Sources of the datasets",
         "widths": [0.16, 0.34, 0.24, 0.26],
@@ -498,7 +535,7 @@ def chapter5():
         + [sub("Safeguards under Fault Injection", "faults5")] + faults + answer4)
 
     adjustments = [
-        ("p", "Three changes were made to the design during the evaluation, each prompted by a "
+        ("p", "Four changes were made to the design during the evaluation, each prompted by a "
               "result."),
         sub("Promotion Gate on Production Features", "adj_gate"),
         ("p", "The first version of the promotion gate compared the challenger and the champion "
@@ -516,7 +553,40 @@ def chapter5():
               "a no-skill check was added (Section [@sec:safety]); the same fault was then "
               "caught after seven days and cost 0.080."),
         sub("Automatic Training-Window Selection", "adj_window"),
-    ] + window
+    ] + window + [
+        sub("Scoring Service under Load", "adj_load"),
+        ("p", "As recommended in supervisor feedback, the scoring API was load tested. The "
+              "service ran as one uvicorn process with the IEEE-CIS champion model, and a client "
+              "on the same machine (Intel Core i5-12400F, 6 cores and 12 threads, 16 GB memory) "
+              "sent real stream transactions with all 433 raw fields to POST /predict. Each "
+              "level ran for 30 seconds after a 5-second warm-up, with 1, 10, 50 and 100 "
+              "concurrent clients that each wait for an answer before sending the next request, "
+              "and with batches of 1 to 1,000 transactions per request. Latency was measured at "
+              "the client, so it includes encoding and the HTTP round trip."),
+        ("p", "The first test showed that the service could not score in real time: it handled "
+              "about 14 requests per second whatever the number of clients, and with 100 "
+              "clients the 95th-percentile latency reached 8 seconds (Table [@tab:loadtest]). "
+              "Profiling one request showed that almost all of the 57 ms went into converting "
+              "the JSON input into a typed table of 433 columns and into LightGBM's per-call "
+              "handling of that table, while evaluating the trees took about 0.2 ms. The scoring "
+              "path was therefore changed: categorical values are mapped once to the booster's "
+              "own training category codes, requests below 1,000 transactions are converted "
+              "directly from the JSON records into a numeric matrix, and small requests are "
+              "scored on one thread so that concurrent requests do not compete for the same "
+              "cores. The scores are identical to the earlier path (maximum difference 0 on "
+              "20,000 stream transactions, with unknown categories, missing fields and text in "
+              "numeric fields covered by a unit test)."),
+        ("table", "loadtest"), ("fig", "loadtest"),
+        ("p", "After the change a single request took 1.2 ms at the median, the service reached "
+              "about 1,300 requests per second from 10 clients on, and the 95th-percentile "
+              "latency stayed below 10 ms with 10 clients and at 82 ms with 100, with no failed "
+              "requests. Batching raised throughput to about 4,000 transactions per second at "
+              "1,000 transactions per request. Throughput levels off at about 1,300 requests per "
+              "second because a single process handles the Python part of each request one at "
+              "a time; more worker processes would scale it further. As the client shared the "
+              "machine with the service, the figures are a conservative estimate for this "
+              "hardware."),
+    ]
 
     statistics = [
         ("p", "Three layers of statistical analysis support the results. First, every "
@@ -533,6 +603,34 @@ def chapter5():
               "example, the drift trigger was reliably worse than the schedule in seven of nine "
               "walk-forward comparisons and never reliably better in any of them, and the "
               "equal-budget analysis pointed the same way whenever labels were delayed."),
+        ("p", "<b>Client identity in IEEE-CIS.</b> The IEEE-CIS labels mark a card as fraud "
+              "after a chargeback and then also mark later transactions linked to the same "
+              "account, email or billing address as fraud. The same client can therefore be "
+              "fraud both in a model's training data and in the weeks it scores, and part of a "
+              "model's skill may come from recognising known fraudulent clients rather than "
+              "fraud patterns. To measure this, a client identifier was reconstructed in the "
+              "way common in the Kaggle competition (card1, addr1 and the day the account was "
+              "opened, derived from D1), and every stream row was assigned, using only labels "
+              "available at its time, to one of four groups: clients with an already known "
+              "fraud, clients seen before without fraud, new clients, and rows without an "
+              "identifier (missing addr1 or D1). The static model and the two 14-day schedules "
+              "were then evaluated on each subset at a 30-day label delay "
+              "(Table [@tab:leakage], Figure [@fig:leakage])."),
+        ("table", "leakage"), ("fig", "leakage"),
+        ("p", "The label propagation is clearly visible: 60% of the transactions of clients "
+              "with a known fraud were fraud, against 3.1% for new clients, and these clients "
+              "made up 0.9% of the stream but 14% of its frauds. Removing them roughly halved "
+              "the gain of the 60-day schedule over the static model, from +0.056 to +0.027 "
+              "PR-AUC, because retrained models learn the frauds of clients flagged after the "
+              "first model was trained; the static model's own PR-AUC rose rather than fell. "
+              "The gains nevertheless remained reliably positive in every subset, including "
+              "new clients only (+0.039, interval 0.030 to 0.049), and the ranking of the "
+              "strategies did not change. The retraining gains reported for IEEE-CIS therefore "
+              "partly reflect this property of the dataset, which a real bank that knows its "
+              "charged-back clients would also exploit, but the conclusions do not depend on "
+              "it. New clients were much harder to score (PR-AUC 0.30 against 0.47 overall). "
+              "The identifier is an approximation, and 41% of the stream's frauds fall in rows "
+              "without one, so the check covers part of the data only."),
     ]
 
     discussion = [
@@ -576,9 +674,9 @@ def chapter5():
               "label arrives after the same delay, without faster investigator feedback. One "
               "model family is used throughout. IEEE-CIS covers only six months, Sparkov is "
               "simulated, and BAF records only the month of each application, so drift within "
-              "a month cannot appear. The equal-budget comparison is complete on IEEE-CIS and "
-              "BAF and under way on Sparkov, and the scoring service has not yet been load "
-              "tested."),
+              "a month cannot appear. In IEEE-CIS, fraud labels are propagated to linked transactions of the same client; the check in Section [@sec:statistics] shows that this roughly halves the retraining gain once clients with a known fraud are excluded, without changing the conclusions. The equal-budget comparison is complete on IEEE-CIS and "
+              "BAF and under way on Sparkov, and the scoring service was load tested on one "
+              "machine, with one worker process and the load generator on the same machine."),
     ]
 
     return {"title": "Result Analysis", "sections": [
@@ -637,9 +735,9 @@ CH6 = {"title": "Conclusion", "sections": [
     ]},
     {"title": "Recommendations for Future Work", "key": "future", "blocks": [
         ("list", [
-            "Complete the equal-budget comparison on Sparkov, and load test the scoring "
-            "service (throughput and p95/p99 latency at increasing concurrency), as recommended "
-            "in supervisor feedback.",
+            "Complete the equal-budget comparison on Sparkov, as recommended in supervisor "
+            "feedback, and repeat the load test on server hardware with several worker "
+            "processes and a separate load generator.",
             "Model faster investigator feedback alongside delayed chargebacks, which could make "
             "performance-based triggers react sooner.",
             "Repeat the study with other model families, such as neural and online learners, to "

@@ -13,3 +13,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+
+# intermediate page printed to P2_Presentation_Speech_BN.pdf
+thesis/poster/speech_bn.html

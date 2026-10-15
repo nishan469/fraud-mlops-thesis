@@ -198,6 +198,67 @@ def equal_budget():
     plt.close(fig)
 
 
+def loadtest():
+    """Scoring API load test: before and after the scoring-path optimisation (same model)."""
+    runs = {"before": os.path.join(OUT, "loadtest_baseline"), "after": os.path.join(OUT, "loadtest")}
+    if not all(os.path.exists(os.path.join(p, "loadtest_concurrency.csv")) for p in runs.values()):
+        return
+    conc = {k: pd.read_csv(os.path.join(p, "loadtest_concurrency.csv")) for k, p in runs.items()}
+    batch = pd.read_csv(os.path.join(runs["after"], "loadtest_batch.csv"))
+    colors = {"before": "#9a9893", "after": BLUE}
+    labels = {"before": "before (DataFrame scoring path)", "after": "after (optimised path)"}
+    fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.3))
+
+    ax = axes[0]
+    x = np.arange(len(conc["after"]))
+    for k, off in (("before", -0.2), ("after", 0.2)):
+        v = conc[k]["requests_per_sec"]
+        ax.bar(x + off, v, 0.38, color=colors[k], label=labels[k])
+        for xi, vi in zip(x + off, v):
+            ax.text(xi, vi, f"{vi:,.0f}", ha="center", va="bottom", fontsize=7.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(conc["after"]["users"])
+    ax.set_xlabel("concurrent clients")
+    ax.set_ylabel("requests per second")
+    ax.set_title("Throughput, 1 transaction per request")
+    ax.set_ylim(0, conc["after"]["requests_per_sec"].max() * 1.45)
+    ax.legend(frameon=False, fontsize=7.5, loc="upper left")
+    style(ax)
+
+    ax = axes[1]
+    for k in ("before", "after"):
+        c = conc[k]
+        ax.plot(c["users"], c["p95_ms"], marker="o", color=colors[k], label=labels[k])
+        for u, v in zip(c["users"], c["p95_ms"]):
+            ax.annotate(f"{v:,.0f}", (u, v), textcoords="offset points", xytext=(0, 5),
+                        ha="center", fontsize=7.5)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xticks(conc["after"]["users"])
+    ax.set_xticklabels(conc["after"]["users"])
+    ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+    ax.set_xlabel("concurrent clients")
+    ax.set_ylabel("p95 latency (ms, log scale)")
+    ax.set_title("95th-percentile latency")
+    style(ax)
+
+    ax = axes[2]
+    xb = np.arange(len(batch))
+    ax.bar(xb, batch["transactions_per_sec"], 0.6, color=BLUE)
+    for xi, v, p in zip(xb, batch["transactions_per_sec"], batch["p50_ms"]):
+        ax.text(xi, v, f"{v:,.0f}\n({p:.0f} ms)", ha="center", va="bottom", fontsize=7.5)
+    ax.set_xticks(xb)
+    ax.set_xticklabels(batch["batch"])
+    ax.set_ylim(0, batch["transactions_per_sec"].max() * 1.3)
+    ax.set_xlabel("transactions per request (1 client)")
+    ax.set_ylabel("transactions per second")
+    ax.set_title("Batch scoring, after")
+    style(ax)
+    fig.tight_layout()
+    fig.savefig(os.path.join(FIG, "results_loadtest.png"), dpi=200)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     os.makedirs(FIG, exist_ok=True)
     equal_budget()
@@ -205,4 +266,5 @@ if __name__ == "__main__":
     delay()
     window()
     gate()
+    loadtest()
     print("results figures written")

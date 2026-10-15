@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 
 from fraud_mlops.config import load_config
@@ -77,6 +78,26 @@ def test_training_and_gate(store, cfg):
     if not np.isnan(result.champion_pr_auc):
         # the synthetic signal drifts, so the newer model should hold up on recent data
         assert result.challenger_pr_auc >= result.champion_pr_auc - 0.05
+
+
+def test_fast_scoring_paths_match_dataframe_scoring(store, cfg):
+    """The numeric-matrix and JSON-record paths must give exactly the booster's own
+    DataFrame scores, including unknown categories, missing fields and text in numbers."""
+    model = train_on_window(store, 0, 50, cfg.model, n_ref_sample=1000)
+    X = store.X(store.rows(50, 60)).head(300)
+    ref = model.booster.predict(model._prepare(X), num_iteration=model.spec["best_iteration"])
+    np.testing.assert_array_equal(model.predict(X), ref)
+
+    records = X.astype(object).where(X.notna(), None).to_dict(orient="records")
+    records[0]["ProductCD"] = "never-seen"
+    records[1]["TransactionAmt"] = "not a number"
+    del records[2]["C1"]
+    ref = model.booster.predict(model._prepare(pd.DataFrame(records)),
+                                num_iteration=model.spec["best_iteration"])
+    for k in (1, 5, 64, 300):
+        got = np.concatenate([model.decide_records(records[i:i + k])[0]
+                              for i in range(0, len(records), k)])
+        np.testing.assert_array_equal(got, ref)
 
 
 def test_monitor_uses_only_unseen_matured_labels(store, cfg):

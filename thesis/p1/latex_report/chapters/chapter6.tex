@@ -25,7 +25,7 @@ This thesis set out to design and evaluate a drift-aware continuous learning MLO
 \section{Recommendations for Future Work}\label{sec:future}
 
 \begin{enumerate}
-  \item Complete the equal-budget comparison on Sparkov, and load test the scoring service (throughput and p95/p99 latency at increasing concurrency), as recommended in supervisor feedback.
+  \item Complete the equal-budget comparison on Sparkov, as recommended in supervisor feedback, and repeat the load test on server hardware with several worker processes and a separate load generator.
   \item Model faster investigator feedback alongside delayed chargebacks, which could make performance-based triggers react sooner.
   \item Repeat the study with other model families, such as neural and online learners, to test whether the findings depend on gradient boosted trees.
   \item Monitor the stability of model explanations under drift \cite{john2025,uddin2026} and drift in several data sources separately \cite{hassan2026}.

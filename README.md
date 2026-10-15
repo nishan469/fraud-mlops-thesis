@@ -21,6 +21,9 @@ the `fraud_mlops` framework that implements that decision end to end.
 | `prepare_sparkov.py`, `run_sparkov_replication.py` | Second dataset: data preparation and the full replication |
 | `prepare_baf.py`, `run_replication.py`, `kaggle_run.ipynb` | Third dataset (BAF); generic replication runner; Kaggle notebook |
 | `run_window_selection.py`, `kaggle_window_selection.ipynb` | Automatic training-window selection vs fixed windows, per dataset (local or Kaggle) |
+| `equal_budget.py`, `kaggle_equal_budget.ipynb` | Scheduled vs drift-triggered retraining at an equal retraining budget |
+| `leakage_check.py` | IEEE-CIS client-identity check: PR-AUC and retraining gain without already flagged clients |
+| `load_test.py` | Load test of the scoring API (concurrency 1-100, batches 1-1000; throughput and p50/p95/p99 latency) |
 
 Put `train_transaction.csv` and `train_identity.csv` in `data/`. Install: `pip install -r requirements.txt`.
 

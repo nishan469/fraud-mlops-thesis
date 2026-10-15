@@ -10,7 +10,6 @@ Missing features are treated as missing values (LightGBM handles NaN natively).
 import threading
 from contextlib import asynccontextmanager
 
-import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -59,7 +58,7 @@ def create_app(cfg):
         m = state["model"] or load()
         if not req.transactions:
             raise HTTPException(422, "transactions must be a non-empty list")
-        scores, flags = m.decide(pd.DataFrame(req.transactions))
+        scores, flags = m.decide_records(req.transactions)
         return {"model_version": m.version, "threshold": m.threshold,
                 "predictions": [{"fraud_probability": float(s), "is_fraud": int(f)}
                                 for s, f in zip(scores, flags)]}
